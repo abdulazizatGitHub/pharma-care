@@ -25,7 +25,7 @@ const navLinks = [
   { href: "/bulk-upload", label: "Bulk Upload", icon: Upload },
 ];
 
-export function Sidebar() {
+export function Sidebar({ onCloseMobile }: { onCloseMobile?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
@@ -37,9 +37,9 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`h-screen flex flex-col bg-slate-900 text-white transition-all duration-200 ${
-        collapsed ? "w-16" : "w-60"
-      } shrink-0`}
+      className={`h-full flex flex-col bg-slate-900 text-white transition-all duration-200 ${
+        collapsed ? "w-16" : "w-64"
+      } shrink-0 shadow-2xl lg:shadow-none`}
     >
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 py-5 border-b border-slate-800">
@@ -47,14 +47,25 @@ export function Sidebar() {
           <Pill size={20} className="text-white" />
         </div>
         {!collapsed && (
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="font-bold text-sm text-white truncate">PharmaCare</p>
             <p className="text-xs text-slate-400">Management System</p>
           </div>
         )}
+        
+        {/* Mobile Close Button */}
+        <button
+          onClick={onCloseMobile}
+          className="lg:hidden p-1 rounded-md text-slate-400 hover:text-white transition-colors ml-auto shrink-0"
+          aria-label="Close menu"
+        >
+          <ChevronRight size={20} className="rotate-180" />
+        </button>
+
+        {/* Desktop Collapse Button */}
         <button
           onClick={() => setCollapsed((c) => !c)}
-          className="ml-auto p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="hidden lg:block ml-auto p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           <ChevronRight
@@ -74,7 +85,7 @@ export function Sidebar() {
                 <Link
                   href={href}
                   title={collapsed ? label : undefined}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150
+                  className={`flex items-center gap-3 rounded-xl px-3 py-3 lg:py-2.5 text-sm font-medium transition-all duration-150
                     ${
                       active
                         ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/40"
@@ -83,8 +94,9 @@ export function Sidebar() {
                 >
                   <Icon size={20} className="shrink-0" />
                   {!collapsed && <span>{label}</span>}
+                  <div className="flex-1" onClick={onCloseMobile}></div>
                   {!collapsed && active && (
-                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/60" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-white/60 mx-1" />
                   )}
                 </Link>
               </li>

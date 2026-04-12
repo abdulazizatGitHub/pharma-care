@@ -368,75 +368,104 @@ export default function InventoryPage() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th className={thClass} onClick={() => toggleSort("name")}>
-                    <span className="flex items-center gap-1">Name <SortIcon field="name" /></span>
-                  </th>
-                  <th className={thClass} onClick={() => toggleSort("quantity")}>
-                    <span className="flex items-center gap-1">Stock <SortIcon field="quantity" /></span>
-                  </th>
-                  <th className={thClass} onClick={() => toggleSort("expiryDate")}>
-                    <span className="flex items-center gap-1">Expiry <SortIcon field="expiryDate" /></span>
-                  </th>
-                  <th className={thClass} onClick={() => toggleSort("salePrice")}>
-                    <span className="flex items-center gap-1">Sale Price <SortIcon field="salePrice" /></span>
-                  </th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Status</th>
-                  <th className="py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {paginated.map((med) => (
-                  <tr key={med.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3.5">
-                      <div>
-                        <p className="font-medium text-slate-800">{med.name}</p>
-                        {med.genericName && (
-                          <p className="text-xs text-slate-400 mt-0.5">{med.genericName}</p>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <span className={`font-semibold ${isLowStock(med.quantity) ? "text-amber-600" : "text-slate-700"}`}>
-                        {med.quantity}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3.5 text-slate-600">{formatDate(med.expiryDate)}</td>
-                    <td className="px-4 py-3.5 font-medium text-slate-700">
-                      {formatCurrency(med.salePrice)}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex flex-wrap gap-1">
-                        <StockBadge qty={med.quantity} />
-                        <ExpiryBadge date={med.expiryDate} />
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          onClick={() => setEditMed(med)}
-                          className="w-8 h-8 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 flex items-center justify-center transition-colors"
-                          title="Edit medicine"
-                        >
-                          <Pencil size={15} />
-                        </button>
-                        <button
-                          onClick={() => setDeleteMed(med)}
-                          className="w-8 h-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors"
-                          title="Remove medicine"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
+          <>
+            {/* Mobile List View */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {paginated.map((med) => (
+                <div key={med.id} className="p-4 flex flex-col gap-3">
+                  <div className="flex justify-between items-start gap-2">
+                    <div>
+                      <p className="font-bold text-slate-800">{med.name}</p>
+                      {med.genericName && <p className="text-xs text-slate-400 mt-0.5">{med.genericName}</p>}
+                    </div>
+                    <div className="flex gap-1">
+                       <button onClick={() => setEditMed(med)} className="p-1.5 text-slate-400 hover:text-indigo-600 bg-slate-50 rounded-lg"><Pencil size={15} /></button>
+                       <button onClick={() => setDeleteMed(med)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-slate-50 rounded-lg"><Trash2 size={15} /></button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <StockBadge qty={med.quantity} />
+                    <span className="text-sm font-semibold text-indigo-700">{formatCurrency(med.salePrice)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs text-slate-500">
+                    <span>Exp: {formatDate(med.expiryDate)}</span>
+                    <ExpiryBadge date={med.expiryDate} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-100">
+                  <tr>
+                    <th className={thClass} onClick={() => toggleSort("name")}>
+                      <span className="flex items-center gap-1">Name <SortIcon field="name" /></span>
+                    </th>
+                    <th className={thClass} onClick={() => toggleSort("quantity")}>
+                      <span className="flex items-center gap-1">Stock <SortIcon field="quantity" /></span>
+                    </th>
+                    <th className={thClass} onClick={() => toggleSort("expiryDate")}>
+                      <span className="flex items-center gap-1">Expiry <SortIcon field="expiryDate" /></span>
+                    </th>
+                    <th className={thClass} onClick={() => toggleSort("salePrice")}>
+                      <span className="flex items-center gap-1">Sale Price <SortIcon field="salePrice" /></span>
+                    </th>
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Status</th>
+                    <th className="py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {paginated.map((med) => (
+                    <tr key={med.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3.5">
+                        <div>
+                          <p className="font-medium text-slate-800">{med.name}</p>
+                          {med.genericName && (
+                            <p className="text-xs text-slate-400 mt-0.5">{med.genericName}</p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <span className={`font-semibold ${isLowStock(med.quantity) ? "text-amber-600" : "text-slate-700"}`}>
+                          {med.quantity}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-slate-600">{formatDate(med.expiryDate)}</td>
+                      <td className="px-4 py-3.5 font-medium text-slate-700">
+                        {formatCurrency(med.salePrice)}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex flex-wrap gap-1">
+                          <StockBadge qty={med.quantity} />
+                          <ExpiryBadge date={med.expiryDate} />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => setEditMed(med)}
+                            className="w-8 h-8 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 flex items-center justify-center transition-colors"
+                            title="Edit medicine"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteMed(med)}
+                            className="w-8 h-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors"
+                            title="Remove medicine"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
         {/* Pagination */}

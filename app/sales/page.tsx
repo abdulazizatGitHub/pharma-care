@@ -214,7 +214,7 @@ export default function POSPage() {
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-full print:hidden" style={{ animation: "fadeIn 0.2s ease-out" }}>
       {/* ─── Left: POS Search & Catalog ────────────── */}
-      <div className="flex flex-col gap-4 w-full lg:w-2/3 h-full">
+      <div className="flex flex-col gap-4 w-full lg:w-2/3 lg:h-full shrink-0">
         {/* Large Search Bar */}
         <div className="relative shrink-0">
           <Search size={22} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -231,7 +231,7 @@ export default function POSPage() {
         </div>
 
         {/* Catalog Grid */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 lg:overflow-y-auto">
           {matchedMeds.length === 0 ? (
             <EmptyState
               icon={<Search size={32} />}
@@ -239,14 +239,14 @@ export default function POSPage() {
               description={search ? `No items match "${search}"` : "Search for a medicine to begin"}
             />
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 pr-2 pb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 pr-0 lg:pr-2 pb-6">
               {matchedMeds.map((med) => {
                 const isLow = isLowStock(med.quantity);
                 return (
                   <button
                     key={med.id}
                     onClick={() => addToCart(med.id)}
-                    className="flex flex-col text-left bg-white p-4 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    className="flex flex-col text-left bg-white p-4 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md active:-translate-y-0.5 lg:hover:-translate-y-0.5 lg:active:translate-y-0 transition-all focus:outline-none focus:ring-2 focus:ring-indigo-400"
                   >
                     <div className="flex-1 min-w-0 w-full">
                       <p className="font-bold text-slate-800 line-clamp-1">{med.name}</p>
@@ -269,8 +269,8 @@ export default function POSPage() {
       </div>
 
       {/* ─── Right: Cart & Checkout ───────────────── */}
-      <Card className="flex flex-col w-full lg:w-1/3 shrink-0 h-full !p-0 overflow-hidden shadow-xl border-slate-200">
-        <div className="bg-slate-800 px-5 py-4 text-white flex items-center justify-between shrink-0">
+      <Card className="flex flex-col w-full lg:w-1/3 shrink-0 lg:h-full !p-0 shadow-xl border-slate-200">
+        <div className="bg-slate-800 px-5 py-4 text-white flex items-center justify-between shrink-0 rounded-t-2xl">
           <div className="flex items-center gap-2">
             <ShoppingCart size={20} className="text-indigo-400" />
             <h2 className="font-bold text-lg tracking-wide">Current Order</h2>
@@ -281,9 +281,9 @@ export default function POSPage() {
         </div>
 
         {/* Cart Items */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
+        <div className="flex-1 lg:overflow-y-auto p-4 space-y-3 bg-slate-50/50 min-h-[30vh] lg:min-h-0">
           {cart.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3">
+            <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-3 py-10 lg:py-0">
               <ShoppingCart size={40} className="opacity-20" />
               <p className="text-sm font-medium">Cart is empty</p>
             </div>
@@ -302,33 +302,33 @@ export default function POSPage() {
                     <p className="font-semibold text-slate-800 line-clamp-1">{item.medicine.name}</p>
                     <button
                       onClick={() => removeFromCart(item.medicine.id)}
-                      className="text-slate-300 hover:text-rose-500 transition-colors"
+                      className="text-slate-300 hover:text-rose-500 transition-colors p-1"
                       aria-label="Remove item"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={18} />
                     </button>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center border border-slate-200 rounded-lg overflow-hidden shrink-0">
                       <button
                         onClick={() => changeQty(item.medicine.id, -1)}
-                        className="w-10 h-8 bg-slate-50 flex items-center justify-center text-slate-500 hover:bg-slate-100 active:bg-slate-200 font-bold transition-colors"
+                        className="w-12 h-10 lg:w-10 lg:h-8 bg-slate-50 flex items-center justify-center text-slate-500 hover:bg-slate-100 active:bg-slate-200 font-bold transition-colors"
                       >
-                        <Minus size={14} />
+                        <Minus size={16} />
                       </button>
-                      <div className="w-10 h-8 flex items-center justify-center text-sm font-bold bg-white text-slate-800 border-x border-slate-200">
+                      <div className="w-10 h-10 lg:w-10 lg:h-8 flex items-center justify-center text-sm font-bold bg-white text-slate-800 border-x border-slate-200">
                         {item.quantity}
                       </div>
                       <button
                         onClick={() => changeQty(item.medicine.id, 1)}
                         disabled={item.quantity >= max}
-                        className="w-10 h-8 bg-slate-50 flex items-center justify-center text-slate-500 hover:bg-slate-100 focus:bg-slate-200 disabled:opacity-40 transition-colors"
+                        className="w-12 h-10 lg:w-10 lg:h-8 bg-slate-50 flex items-center justify-center text-slate-500 hover:bg-slate-100 focus:bg-slate-200 disabled:opacity-40 transition-colors"
                       >
-                        <Plus size={14} />
+                        <Plus size={16} />
                       </button>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-slate-800 text-sm">
+                      <p className="font-bold text-slate-800 text-[15px] lg:text-sm">
                         {formatCurrency(item.medicine.salePrice * item.quantity)}
                       </p>
                       <p className="text-[10px] uppercase font-semibold text-slate-400 mt-0.5">
@@ -337,7 +337,7 @@ export default function POSPage() {
                     </div>
                   </div>
                   {overLimit && (
-                    <p className="text-xs text-rose-600 font-medium">⚠ Only {max} available in stock.</p>
+                    <p className="text-xs text-rose-600 font-medium">⚠ Only {max} available.</p>
                   )}
                 </div>
               );
@@ -346,7 +346,7 @@ export default function POSPage() {
         </div>
 
         {/* Checkout Summary Footer */}
-        <div className="bg-white border-t border-slate-200 p-5 shrink-0 flex flex-col gap-4">
+        <div className="sticky bottom-0 z-20 bg-white border-t border-slate-200 p-5 shrink-0 flex flex-col gap-4 rounded-b-2xl lg:relative lg:bottom-auto shadow-[0_-10px_20px_-5px_rgba(0,0,0,0.05)] lg:shadow-none">
           <div className="grid grid-cols-2 gap-3">
             <div className="relative">
               <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -355,7 +355,7 @@ export default function POSPage() {
                 placeholder="Customer Name (opt)"
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
-                className="w-full h-10 pl-9 pr-3 rounded-lg border border-slate-200 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                className="w-full h-11 lg:h-10 pl-9 pr-3 rounded-lg border border-slate-200 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
               />
             </div>
             <div className="relative">
@@ -366,18 +366,18 @@ export default function POSPage() {
                 placeholder="Discount (PKR)"
                 value={discountInput}
                 onChange={(e) => setDiscountInput(e.target.value)}
-                className="w-full h-10 pl-9 pr-3 rounded-lg border border-slate-200 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
+                className="w-full h-11 lg:h-10 pl-9 pr-3 rounded-lg border border-slate-200 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none"
               />
             </div>
           </div>
 
           <div className="space-y-1.5 pt-2 border-t border-slate-100">
-            <div className="flex justify-between text-sm text-slate-500 font-medium">
+            <div className="flex justify-between text-base lg:text-sm text-slate-500 font-medium">
               <span>Subtotal</span>
               <span>{formatCurrency(subtotal)}</span>
             </div>
             {discount > 0 && (
-              <div className="flex justify-between text-sm text-emerald-600 font-medium">
+              <div className="flex justify-between text-base lg:text-sm text-emerald-600 font-medium">
                 <span>Discount</span>
                 <span>- {formatCurrency(discount)}</span>
               </div>
@@ -391,7 +391,7 @@ export default function POSPage() {
           <Button
             size="lg"
             variant="success"
-            className="w-full h-14 text-lg shadow-xl shadow-emerald-600/20"
+            className="w-full h-16 lg:h-14 text-lg shadow-xl shadow-emerald-600/20"
             icon={<CheckCircle size={22} />}
             onClick={handleCompleteSale}
             loading={completing}

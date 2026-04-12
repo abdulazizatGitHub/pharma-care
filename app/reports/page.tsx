@@ -116,41 +116,65 @@ export default function ReportsPage() {
       </div>
 
       <Card padding="sm" className="shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-100">
-              <tr>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Date</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Type</th>
-                <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Description</th>
-                <th className="text-right py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {ledger.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">
-                    {formatDatetime(item.date)}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <Badge variant={item.type === "Sale" ? "success" : "neutral"}>{item.type}</Badge>
-                  </td>
-                  <td className="px-4 py-3.5 font-medium text-slate-800">{item.description}</td>
-                  <td className={`px-4 py-3.5 text-right font-semibold ${item.amount > 0 ? "text-emerald-600" : "text-slate-600"}`}>
+        <>
+          {/* Mobile List View */}
+          <div className="md:hidden divide-y divide-slate-100">
+            {ledger.map((item) => (
+              <div key={item.id} className="p-4 flex flex-col gap-2">
+                <div className="flex justify-between items-start">
+                  <p className="font-bold text-slate-800">{item.description}</p>
+                  <span className={`font-semibold ${item.amount > 0 ? "text-emerald-600" : "text-slate-600"}`}>
                     {item.amount > 0 ? "+" : ""}{formatCurrency(item.amount)}
-                  </td>
-                </tr>
-              ))}
-              {ledger.length === 0 && (
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-500">{formatDatetime(item.date)}</span>
+                  <Badge variant={item.type === "Sale" ? "success" : "neutral"}>{item.type}</Badge>
+                </div>
+              </div>
+            ))}
+            {ledger.length === 0 && (
+              <div className="p-8 text-center text-slate-400">No transactions found</div>
+            )}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-100">
                 <tr>
-                  <td colSpan={4} className="px-4 py-12 text-center text-slate-400">
-                    No transactions found
-                  </td>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Date</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Type</th>
+                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Description</th>
+                  <th className="text-right py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {ledger.map((item) => (
+                  <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">
+                      {formatDatetime(item.date)}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <Badge variant={item.type === "Sale" ? "success" : "neutral"}>{item.type}</Badge>
+                    </td>
+                    <td className="px-4 py-3.5 font-medium text-slate-800">{item.description}</td>
+                    <td className={`px-4 py-3.5 text-right font-semibold ${item.amount > 0 ? "text-emerald-600" : "text-slate-600"}`}>
+                      {item.amount > 0 ? "+" : ""}{formatCurrency(item.amount)}
+                    </td>
+                  </tr>
+                ))}
+                {ledger.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-12 text-center text-slate-400">
+                      No transactions found
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
       </Card>
     </div>
   );

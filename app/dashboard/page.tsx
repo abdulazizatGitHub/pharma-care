@@ -206,7 +206,33 @@ export default function DashboardPage() {
             View all <ArrowRight size={12} />
           </Link>
         </div>
-        <div className="overflow-x-auto -mx-6 px-6">
+        <div className="md:hidden divide-y divide-slate-100">
+          {sales.slice(0, 5).map((sale) => (
+            <div key={sale.id} className="py-3 flex flex-col gap-1">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-semibold text-slate-800">
+                  {formatCurrency(sale.totalAmount)}
+                </span>
+                <span className="text-xs text-slate-500">
+                  {new Date(sale.createdAt).toLocaleString("en-PK", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 line-clamp-1">
+                {sale.items.map((i) => `${i.medicineName} ×${i.quantity}`).join(", ")}
+              </p>
+            </div>
+          ))}
+          {sales.length === 0 && (
+            <div className="py-8 text-center text-slate-400">No sales yet</div>
+          )}
+        </div>
+
+        <div className="hidden md:block overflow-x-auto -mx-6 px-6">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100">

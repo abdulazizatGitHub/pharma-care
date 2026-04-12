@@ -212,51 +212,76 @@ export default function ExpensesPage() {
             }
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Date</th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Description</th>
-                  <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Category</th>
-                  <th className="text-right py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount</th>
-                  <th className="py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {expenses.map((exp) => (
-                  <tr key={exp.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">
-                      {formatDate(exp.date)}
-                    </td>
-                    <td className="px-4 py-3.5 font-medium text-slate-800">{exp.description}</td>
-                    <td className="px-4 py-3.5">
-                      <Badge variant={categoryVariant[exp.category]}>{exp.category}</Badge>
-                    </td>
-                    <td className="px-4 py-3.5 text-right font-semibold text-rose-600">
-                      {formatCurrency(exp.amount)}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          onClick={() => setEditExp(exp)}
-                          className="w-8 h-8 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 flex items-center justify-center transition-colors"
-                        >
-                          <Pencil size={15} />
-                        </button>
-                        <button
-                          onClick={() => setDeleteExp(exp)}
-                          className="w-8 h-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
+          <>
+            {/* Mobile List View */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {expenses.map((exp) => (
+                <div key={exp.id} className="p-4 flex flex-col gap-2">
+                  <div className="flex justify-between items-start">
+                    <p className="font-bold text-slate-800">{exp.description}</p>
+                    <div className="-mt-1 flex gap-1">
+                      <button onClick={() => setEditExp(exp)} className="p-1.5 text-slate-400 hover:text-indigo-600 bg-slate-50 rounded-lg"><Pencil size={15} /></button>
+                      <button onClick={() => setDeleteExp(exp)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-slate-50 rounded-lg"><Trash2 size={15} /></button>
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-500">{formatDate(exp.date)}</span>
+                    <span className="font-semibold text-rose-600">{formatCurrency(exp.amount)}</span>
+                  </div>
+                  <div>
+                    <Badge variant={categoryVariant[exp.category]}>{exp.category}</Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 border-b border-slate-100">
+                  <tr>
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Date</th>
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Description</th>
+                    <th className="text-left py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Category</th>
+                    <th className="text-right py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount</th>
+                    <th className="py-3 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wide text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {expenses.map((exp) => (
+                    <tr key={exp.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">
+                        {formatDate(exp.date)}
+                      </td>
+                      <td className="px-4 py-3.5 font-medium text-slate-800">{exp.description}</td>
+                      <td className="px-4 py-3.5">
+                        <Badge variant={categoryVariant[exp.category]}>{exp.category}</Badge>
+                      </td>
+                      <td className="px-4 py-3.5 text-right font-semibold text-rose-600">
+                        {formatCurrency(exp.amount)}
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => setEditExp(exp)}
+                            className="w-8 h-8 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 flex items-center justify-center transition-colors"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteExp(exp)}
+                            className="w-8 h-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </Card>
 
