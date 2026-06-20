@@ -7,15 +7,16 @@ interface CardProps {
 }
 
 const paddingStyles = {
-  sm: "p-4",
-  md: "p-6",
-  lg: "p-8",
+  sm: "px-3 py-2.5",
+  md: "px-3.5 py-3",
+  lg: "px-5 py-4",
 };
 
 export function Card({ children, className = "", padding = "md" }: CardProps) {
   return (
     <div
-      className={`bg-white rounded-2xl border border-slate-100 shadow-sm ${paddingStyles[padding]} ${className}`}
+      style={{ border: '0.5px solid rgba(0,0,0,0.08)' }}
+      className={`bg-white rounded-lg ${paddingStyles[padding]} ${className}`}
     >
       {children}
     </div>

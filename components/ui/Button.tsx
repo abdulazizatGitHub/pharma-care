@@ -2,9 +2,10 @@
 
 import React from "react";
 import { Loader2 } from "lucide-react";
+import { buttonVariants as _buttonVariants, type ButtonVariant, type ButtonSize } from "@/lib/button-variants";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "success";
-type ButtonSize = "sm" | "md" | "lg";
+export type { ButtonVariant, ButtonSize };
+export { _buttonVariants as buttonVariants };
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -14,21 +15,17 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variantStyles: Record<ButtonVariant, string> = {
-  primary:
-    "bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 shadow-sm shadow-indigo-200",
-  secondary:
-    "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300",
-  ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-800",
-  danger:
-    "bg-rose-600 text-white hover:bg-rose-700 active:bg-rose-800 shadow-sm shadow-rose-200",
-  success:
-    "bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800 shadow-sm shadow-emerald-200",
+  primary:   "bg-[#0F6E56] text-white hover:bg-[#0a5a45] active:bg-[#0a5a45]",
+  secondary: "bg-white text-[#111827] border border-[rgba(0,0,0,0.15)] hover:bg-[#f9fafb]",
+  ghost:     "text-[#111827] hover:bg-[#f3f4f6]",
+  danger:    "bg-[#FCEBEB] text-[#A32D2D] border border-[#f09595] hover:bg-[#fde8e8]",
+  success:   "bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800",
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
-  sm: "h-9 px-3 text-sm rounded-lg gap-1.5",
-  md: "h-11 px-4 text-sm rounded-xl gap-2",
-  lg: "h-12 px-6 text-base rounded-xl gap-2",
+  sm: "h-7 px-3 text-[11px] rounded-md gap-1.5",
+  md: "h-8 px-3.5 text-[12px] rounded-md gap-2",
+  lg: "h-9 px-4 text-[13px] rounded-md gap-2",
 };
 
 export function Button({
@@ -48,7 +45,7 @@ export function Button({
       disabled={isDisabled}
       className={`
         inline-flex items-center justify-center font-medium transition-all duration-150 whitespace-nowrap
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0F6E56] focus-visible:ring-offset-2
         disabled:opacity-50 disabled:cursor-not-allowed
         ${variantStyles[variant]}
         ${sizeStyles[size]}
@@ -56,7 +53,7 @@ export function Button({
       `}
     >
       {loading ? (
-        <Loader2 size={16} className="animate-spin shrink-0" />
+        <Loader2 size={14} className="animate-spin shrink-0" />
       ) : (
         icon && <span className="shrink-0">{icon}</span>
       )}

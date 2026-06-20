@@ -1,0 +1,157 @@
+'use client'
+
+import React from 'react'
+import { Trash2, Minus, Plus } from 'lucide-react'
+import { useCart } from '@/lib/pos-context'
+import type { CartItem as CartItemType } from '@/lib/pos-types'
+
+interface Props {
+  item:           CartItemType
+  maxDiscountPct: number
+}
+
+export function CartItemRow({ item, maxDiscountPct }: Props) {
+  const { removeItem, updateQuantity, updateDiscount } = useCart()
+
+  const expiryStr = item.isBorrowed
+    ? null
+    : new Date(item.expiryDate).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+
+  const lineBeforeDiscount = item.quantity * item.unitPrice
+  const hasDiscount        = item.discountPct > 0
+  const borrowMargin       = item.isBorrowed && item.borrowCost != null
+    ? item.unitPrice - item.borrowCost
+    : null
+
+  return (
+    <div className="py-3 border-b border-[rgba(0,0,0,0.06)] last:border-0">
+      {/* Name + remove */}
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-[12px] font-bold text-[#111827] truncate">{item.medicineName}</p>
+            {item.isBorrowed && (
+              <span className="shrink-0 text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-300 rounded px-1 py-0.5 uppercase tracking-wide">
+                Borrowed
+              </span>
+            )}
+          </div>
+          {item.isBorrowed ? (
+            <p className="text-[10px] text-[#9ca3af] mt-0.5">
+              from {item.borrowedFromName ?? '—'}
+              {item.borrowCost != null && (
+                <> · Cost: Rs {item.borrowCost.toFixed(2)} · Margin: Rs {(borrowMargin ?? 0).toFixed(2)}</>
+              )}
+            </p>
+          ) : (
+            <p className="text-[10px] text-[#9ca3af]">
+              Batch: {item.batchNo} · Exp: {expiryStr}
+            </p>
+          )}
+          {(item.isControlled || item.isPrescription) && (
+            <p
+              className="text-[10px] font-medium"
+              style={{ color: item.isControlled ? '#A32D2D' : '#185FA5' }}
+            >
+              {item.isControlled ? 'Controlled' : 'Prescription'}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => removeItem(item.id)}
+          className="shrink-0 w-6 h-6 flex items-center justify-center rounded text-[#e53e3e] hover:bg-rose-50 transition-colors"
+          aria-label={`Remove ${item.medicineName}`}
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+
+      {/* Qty stepper + price calculation */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Qty stepper — read-only for borrowed items (qty fixed by temp batch) */}
+        {item.isBorrowed ? (
+          <div className="flex items-center rounded-md border border-[rgba(0,0,0,0.1)] bg-[#f9fafb] overflow-hidden">
+            <span className="w-6 h-6 flex items-center justify-center text-[#9ca3af]">
+              <Minus size={10} />
+            </span>
+            <span className="w-9 h-6 flex items-center justify-center text-center text-[11px] text-[#111827] border-x border-[rgba(0,0,0,0.08)]">
+              {item.quantity}
+            </span>
+            <span className="w-6 h-6 flex items-center justify-center text-[#9ca3af]">
+              <Plus size={10} />
+            </span>
+          </div>
+        ) : (
+        <div className="flex items-center rounded-md border border-[rgba(0,0,0,0.15)] bg-white overflow-hidden">
+          <button
+            onClick={() => updateQuantity(item.id, item.quantity - 1)}
+            disabled={item.quantity <= 1}
+            className="w-6 h-6 flex items-center justify-center text-[#6b7280] hover:bg-[#f3f4f6] disabled:opacity-40 transition-colors"
+            aria-label="Decrease quantity"
+          >
+            <Minus size={10} />
+          </button>
+          <input
+            type="number"
+            min="1"
+            value={item.quantity}
+            onChange={e => updateQuantity(item.id, parseInt(e.target.value, 10) || 1)}
+            className="w-9 h-6 text-center text-[11px] text-[#111827] border-x border-[rgba(0,0,0,0.1)] focus:outline-none focus:ring-1 focus:ring-[#0F6E56]"
+            aria-label="Quantity"
+          />
+          <button
+            onClick={() => updateQuantity(item.id, item.quantity + 1)}
+            className="w-6 h-6 flex items-center justify-center text-[#6b7280] hover:bg-[#f3f4f6] transition-colors"
+            aria-label="Increase quantity"
+          >
+            <Plus size={10} />
+          </button>
+        </div>
+        )}
+
+        {/* qty × price */}
+        <span className="text-[11px] text-[#6b7280]">
+          × Rs {item.unitPrice.toFixed(2)}
+        </span>
+        <span className="text-[11px] text-[#9ca3af]">=</span>
+        <span className="text-[11px] text-[#111827]">
+          Rs {lineBeforeDiscount.toFixed(2)}
+        </span>
+
+        {/* MRP muted */}
+        <span className="text-[10px] text-[#9ca3af] ml-1">
+          MRP Rs {item.mrp.toFixed(2)}
+        </span>
+      </div>
+
+      {/* Discount + final total */}
+      {maxDiscountPct > 0 && (
+        <div className="flex items-center gap-2 mt-1.5">
+          <span className="text-[11px] text-[#6b7280]">Discount:</span>
+          <select
+            value={item.discountPct}
+            onChange={e => updateDiscount(item.id, parseInt(e.target.value, 10))}
+            className="h-6 px-1.5 rounded border border-[rgba(0,0,0,0.15)] text-[11px] text-[#111827] bg-white focus:outline-none focus:ring-1 focus:ring-[#0F6E56]"
+            aria-label="Discount %"
+          >
+            {Array.from({ length: maxDiscountPct + 1 }, (_, i) => (
+              <option key={i} value={i}>{i}%</option>
+            ))}
+          </select>
+          <span className="ml-auto text-[12px] font-semibold" style={{ color: hasDiscount ? '#0F6E56' : '#111827' }}>
+            Rs {item.totalPrice.toFixed(2)}
+          </span>
+        </div>
+      )}
+
+      {/* Total without discount row (when no discount selector) */}
+      {maxDiscountPct === 0 && (
+        <div className="flex justify-end mt-1">
+          <span className="text-[12px] font-semibold text-[#111827]">
+            Rs {item.totalPrice.toFixed(2)}
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}

@@ -4,6 +4,8 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.15) transparent;
 }
 
 html {
@@ -12,8 +14,7 @@ html {
 }
 
 body {
-  background-color: #f8fafc;
-  color: #1e293b;
+  font-size: 14px;
 }
 
 /* ─── Global animations ─────────────────────────────────── */
@@ -55,14 +56,14 @@ body {
 /* ─── Print styles ──────────────────────────────────────── */
 @media print {
   @page {
-    margin: 0;
+    margin: 16mm;
     size: auto;
   }
-  
+
   body {
     background-color: white !important;
   }
-  
+
   /* Hide Next.js dev overlays if present */
   nextjs-portal {
     display: none !important;
@@ -71,4 +72,22 @@ body {
   .print-hidden {
     display: none !important;
   }
+
+  /* Hide app shell (sidebar + header already print:hidden via Tailwind in RoleShell) */
+  nav, aside, header,
+  [data-sidebar],
+  [data-print-hide] { display: none !important; }
+
+  /* Hide date selector and tab nav */
+  .reports-date-selector,
+  .reports-tab-nav { display: none !important; }
+
+  /* Full-width content */
+  main { width: 100% !important; margin: 0 !important; padding: 0 !important; }
+
+  /* Show print header */
+  .reports-print-header { display: block !important; }
 }
+
+/* Hide print header on screen */
+.reports-print-header { display: none; }

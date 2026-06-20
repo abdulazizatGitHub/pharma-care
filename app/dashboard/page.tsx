@@ -90,34 +90,26 @@ export default function DashboardPage() {
         <StatCard
           label="Total Medicines"
           value={String(stats.totalMedicines)}
-          icon={<Pill size={22} />}
-          iconBg="bg-indigo-100"
-          accent="text-indigo-600"
+          icon={Pill}
         />
         <StatCard
           label="Medicines Running Low"
           value={String(stats.lowStockCount)}
-          icon={<AlertTriangle size={22} />}
-          iconBg="bg-amber-100"
-          accent="text-amber-600"
+          icon={AlertTriangle}
           trend={stats.lowStockCount > 0 ? "down" : "neutral"}
           trendLabel={stats.lowStockCount > 0 ? "Needs reorder" : "All stocked"}
         />
         <StatCard
           label="Today's Sales"
           value={formatCurrency(stats.todaySalesTotal)}
-          icon={<ShoppingCart size={22} />}
-          iconBg="bg-emerald-100"
-          accent="text-emerald-600"
+          icon={ShoppingCart}
           trend="up"
           trendLabel={`${stats.todaySalesCount} transaction${stats.todaySalesCount !== 1 ? "s" : ""} today`}
         />
         <StatCard
           label="This Month's Profit"
           value={formatCurrency(stats.profit)}
-          icon={<TrendingUp size={22} />}
-          iconBg={stats.profit >= 0 ? "bg-emerald-100" : "bg-rose-100"}
-          accent={stats.profit >= 0 ? "text-emerald-600" : "text-rose-600"}
+          icon={TrendingUp}
           trend={stats.profit >= 0 ? "up" : "down"}
           trendLabel={`Revenue ${formatCurrency(stats.monthlyRevenue)}`}
         />

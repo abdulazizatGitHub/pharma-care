@@ -181,18 +181,14 @@ export default function ExpensesPage() {
         <StatCard
           label="This Month's Expenses"
           value={formatCurrency(stats.monthly)}
-          icon={<Receipt size={22} />}
-          iconBg="bg-rose-100"
-          accent="text-rose-600"
+          icon={Receipt}
           trendLabel={`${stats.monthCount} entries this month`}
           trend="neutral"
         />
         <StatCard
           label="Total All Time"
           value={formatCurrency(stats.total)}
-          icon={<Receipt size={22} />}
-          iconBg="bg-slate-100"
-          accent="text-slate-600"
+          icon={Receipt}
           trendLabel={`${stats.count} entries total`}
           trend="neutral"
         />

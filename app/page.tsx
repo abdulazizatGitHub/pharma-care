@@ -1,24 +1,23 @@
-"use client";
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { ROLE_HOME } from '@/lib/routes'
+import type { UserRole } from '@/lib/permissions'
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { getData } from "@/services/storage";
-import { STORAGE_KEYS } from "@/lib/constants";
-import { seedData } from "@/lib/seed";
-import type { AuthSession } from "@/lib/types";
+export default async function RootPage() {
+  const supabase = await createClient()
 
-export default function HomePage() {
-  const router = useRouter();
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
 
-  useEffect(() => {
-    seedData();
-    const session = getData<AuthSession>(STORAGE_KEYS.AUTH);
-    if (session.length > 0) {
-      router.replace("/dashboard");
-    } else {
-      router.replace("/login");
-    }
-  }, [router]);
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single()
 
-  return null;
+  if (!profile) {
+    redirect(`/unauthorized?message=${encodeURIComponent('Profile not found. Contact administrator.')}`)
+  }
+
+  redirect(ROLE_HOME[profile.role as UserRole] ?? '/unauthorized')
 }

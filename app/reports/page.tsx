@@ -92,25 +92,19 @@ export default function ReportsPage() {
         <StatCard
           label="Total Revenue"
           value={formatCurrency(stats.revenue)}
-          icon={<FileText size={22} />}
-          iconBg="bg-emerald-100"
-          accent="text-emerald-700"
+          icon={FileText}
           trend="up"
         />
         <StatCard
           label="Total Expenses"
           value={formatCurrency(stats.costs)}
-          icon={<FileText size={22} />}
-          iconBg="bg-rose-100"
-          accent="text-rose-700"
+          icon={FileText}
           trend="down"
         />
         <StatCard
           label="Net Profit"
           value={formatCurrency(stats.profit)}
-          icon={<FileText size={22} />}
-          iconBg={stats.profit >= 0 ? "bg-indigo-100" : "bg-rose-100"}
-          accent={stats.profit >= 0 ? "text-indigo-700" : "text-rose-700"}
+          icon={FileText}
           trend={stats.profit >= 0 ? "up" : "down"}
         />
       </div>
