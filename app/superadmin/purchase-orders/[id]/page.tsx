@@ -12,7 +12,7 @@ export default async function SuperadminPODetailPage({ params }: { params: Promi
   const [{ data: rawPO }, { data: rawItems }] = await Promise.all([
     supabase
       .from('purchase_orders')
-      .select('id, po_number, status, total_amount, notes, rejection_note, created_at, suppliers ( name )')
+      .select('id, po_number, status, total_amount, notes, rejection_note, shortage_notes, created_at, suppliers ( name )')
       .eq('id', id)
       .eq('is_deleted', false)
       .maybeSingle(),
@@ -25,7 +25,7 @@ export default async function SuperadminPODetailPage({ params }: { params: Promi
 
   if (!rawPO) notFound()
 
-  type RawPODetail = { id: string; po_number: string; status: string; total_amount: number; notes: string | null; rejection_note: string | null; created_at: string; suppliers: { name: string } | null }
+  type RawPODetail = { id: string; po_number: string; status: string; total_amount: number; notes: string | null; rejection_note: string | null; shortage_notes: string | null; created_at: string; suppliers: { name: string } | null }
   type RawItem = { id: string; medicine_id: string; quantity: number; unit_price: number; total_price: number; medicines: { name: string; code: string | null } | null }
 
   const typedPO = rawPO as unknown as RawPODetail
@@ -37,6 +37,7 @@ export default async function SuperadminPODetailPage({ params }: { params: Promi
     total_amount:   Number(typedPO.total_amount ?? 0),
     notes:          typedPO.notes ?? null,
     rejection_note: typedPO.rejection_note ?? null,
+    shortage_notes: typedPO.shortage_notes ?? null,
     created_at:     typedPO.created_at,
     supplier_name:  typedPO.suppliers?.name ?? null,
   }
@@ -51,8 +52,9 @@ export default async function SuperadminPODetailPage({ params }: { params: Promi
     totalPrice:   Number(item.total_price),
   }))
 
+  const editableStatuses = ['draft', 'pending_approval', 'confirmed']
   let medicines: MedicineLookup[] = []
-  if (po.status === 'draft') {
+  if (editableStatuses.includes(po.status)) {
     const { data: meds } = await supabase
       .from('medicines')
       .select('id, name, code')

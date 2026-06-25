@@ -475,9 +475,10 @@ const GRNItemSchema = z.object({
 })
 
 export async function createGRN(
-  poId:   string,
-  items:  GRNItemInput[],
-  notes?: string,
+  poId:      string,
+  items:     GRNItemInput[],
+  notes?:    string,
+  isPartial?: boolean,
 ): Promise<{ data?: { grnId: string }; error: string | null }> {
   const { supabase, user, role } = await getCallerContext()
   if (!user || !role) return { error: 'Not authenticated' }
@@ -498,15 +499,18 @@ export async function createGRN(
     .eq('id', poId)
     .eq('is_deleted', false)
     .maybeSingle()
-  if (!po)                       return { error: 'Purchase order not found' }
-  if (po.status !== 'confirmed') return { error: 'GRN can only be recorded for confirmed POs' }
+  if (!po) return { error: 'Purchase order not found' }
+  if (!['confirmed', 'partially_received'].includes(po.status)) {
+    return { error: 'GRN can only be recorded for confirmed or partially received POs' }
+  }
 
-  // Call complete_grn() RPC — atomic: GRN header + items + stock upserts + PO close
+  // Call complete_grn() RPC — atomic: GRN header + items + stock upserts + PO status update
   const { data: grnId, error: rpcError } = await supabase.rpc('complete_grn', {
     p_po_id:       poId,
     p_received_by: user.id,
     p_notes:       notes ?? null,
     p_items:       items,
+    p_is_partial:  isPartial ?? false,
   })
 
   if (rpcError || !grnId) return { error: rpcError?.message ?? 'GRN creation failed' }
@@ -517,7 +521,7 @@ export async function createGRN(
     action:    ACTION_TYPES.CREATE_GRN,
     tableName: 'goods_receipts',
     recordId:  grnId as string,
-    newValue:  { po_id: poId, po_number: po.po_number, item_count: items.length },
+    newValue:  { po_id: poId, po_number: po.po_number, item_count: items.length, is_partial: isPartial ?? false },
   })
 
   PO_PATHS.forEach(p => revalidatePath(p))
@@ -525,4 +529,273 @@ export async function createGRN(
   revalidatePath('/admin/inventory')
   revalidatePath('/pharmacist/inventory')
   return { data: { grnId: grnId as string }, error: null }
+}
+
+// ─── 10. revertPOToDraft ─────────────────────────────────────────────────────
+// confirmed        → admin + superadmin (only if no GRN has been recorded).
+// pending_approval → superadmin only.
+// cancelled        → superadmin only.
+
+export async function revertPOToDraft(
+  poId: string,
+): Promise<{ error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role) return { error: 'Not authenticated' }
+  if (!canWritePO(role)) return { error: 'Insufficient permissions' }
+
+  const { data: po } = await supabase
+    .from('purchase_orders')
+    .select('id, status')
+    .eq('id', poId)
+    .eq('is_deleted', false)
+    .maybeSingle()
+  if (!po) return { error: 'Purchase order not found' }
+
+  const validSources = ['confirmed', 'pending_approval', 'cancelled']
+  if (!validSources.includes(po.status)) {
+    return { error: `Cannot revert a ${po.status} PO to draft` }
+  }
+
+  if (po.status === 'pending_approval' && role !== 'superadmin') {
+    return { error: 'Only superadmin can revert pending approval POs' }
+  }
+
+  if (po.status === 'cancelled' && role !== 'superadmin') {
+    return { error: 'Only superadmin can revert cancelled POs to draft' }
+  }
+
+  // Guard: reject if any GRN exists for this PO (stock was already touched)
+  const { count: grnCount } = await supabase
+    .from('goods_receipts')
+    .select('id', { count: 'exact', head: true })
+    .eq('po_id', poId)
+    .eq('is_deleted', false)
+  if (grnCount && grnCount > 0) {
+    return { error: 'Cannot revert — a goods receipt has already been recorded for this PO' }
+  }
+
+  const { error: updateError } = await supabase
+    .from('purchase_orders')
+    .update({ status: 'draft', updated_at: new Date().toISOString() })
+    .eq('id', poId)
+
+  if (updateError) return { error: updateError.message }
+
+  await logAction({
+    supabase, userId: user.id, userRole: role,
+    action:    ACTION_TYPES.PO_REVERTED_TO_DRAFT,
+    tableName: 'purchase_orders',
+    recordId:  poId,
+    oldValue:  { status: po.status },
+    newValue:  { status: 'draft' },
+  })
+
+  PO_PATHS.forEach(p => revalidatePath(p))
+  return { error: null }
+}
+
+// ─── 11. getPOGRNHistory ──────────────────────────────────────────────────────
+// Returns all GRNs recorded against a PO, ordered by received_at ascending.
+
+export interface GRNSummary {
+  id:           string
+  grn_number:   string
+  received_at:  string
+  total_amount: number | null
+  notes:        string | null
+}
+
+export async function getPOGRNHistory(
+  poId: string,
+): Promise<{ data?: GRNSummary[]; error: string | null }> {
+  const { supabase, user } = await getCallerContext()
+  if (!user) return { error: 'Not authenticated' }
+
+  const { data, error } = await supabase
+    .from('goods_receipts')
+    .select('id, grn_number, received_at, total_amount, notes')
+    .eq('po_id', poId)
+    .eq('is_deleted', false)
+    .order('received_at', { ascending: true })
+
+  if (error) return { error: error.message }
+  return { data: data as GRNSummary[], error: null }
+}
+
+// ─── 12. forceClosePO ────────────────────────────────────────────────────────
+// superadmin only.
+// Only valid for partially_received POs.
+// Calls force_close_po() SECURITY DEFINER RPC for atomic row-locked update.
+
+const ForceClosePOSchema = z.object({
+  poId:  z.string().uuid(),
+  notes: z.string().max(1000).optional(),
+})
+
+export async function forceClosePO(
+  poId:   string,
+  notes?: string,
+): Promise<{ error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role) return { error: 'Not authenticated' }
+  if (role !== 'superadmin') return { error: 'Only superadmin can force-close purchase orders' }
+
+  const parsed = ForceClosePOSchema.safeParse({ poId, notes })
+  if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+  const { data: po } = await supabase
+    .from('purchase_orders')
+    .select('id, status, po_number')
+    .eq('id', poId)
+    .eq('is_deleted', false)
+    .maybeSingle()
+  if (!po) return { error: 'Purchase order not found' }
+  if (po.status !== 'partially_received') {
+    return { error: `Only partially_received POs can be force closed. Current status: ${po.status}` }
+  }
+
+  const { error: rpcError } = await supabase.rpc('force_close_po', {
+    p_po_id:     poId,
+    p_closed_by: user.id,
+    p_notes:     notes ?? null,
+  })
+
+  if (rpcError) return { error: rpcError.message }
+
+  await logAction({
+    supabase, userId: user.id, userRole: role,
+    action:    ACTION_TYPES.PO_FORCE_CLOSED,
+    tableName: 'purchase_orders',
+    recordId:  poId,
+    oldValue:  { status: 'partially_received' },
+    newValue:  { status: 'closed_short', shortage_notes: notes ?? null },
+  })
+
+  PO_PATHS.forEach(p => revalidatePath(p))
+  return { error: null }
+}
+
+// ─── 13. softDeletePO ────────────────────────────────────────────────────────
+// superadmin only.
+// Only valid for cancelled or closed_short POs (terminal states, no stock impact).
+// Sets is_deleted=true — permanently hidden from all lists.
+
+const SoftDeletePOSchema = z.object({
+  poId: z.string().uuid(),
+})
+
+export async function softDeletePO(
+  poId: string,
+): Promise<{ error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role) return { error: 'Not authenticated' }
+  if (role !== 'superadmin') return { error: 'Only superadmin can delete purchase orders' }
+
+  const parsed = SoftDeletePOSchema.safeParse({ poId })
+  if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+  const { data: po } = await supabase
+    .from('purchase_orders')
+    .select('id, status, po_number')
+    .eq('id', poId)
+    .eq('is_deleted', false)
+    .maybeSingle()
+  if (!po) return { error: 'Purchase order not found' }
+
+  if (!['cancelled', 'closed_short'].includes(po.status)) {
+    return { error: `Only cancelled or closed_short POs can be deleted. Current status: ${po.status}` }
+  }
+
+  const now = new Date().toISOString()
+  const { error: updateError } = await supabase
+    .from('purchase_orders')
+    .update({ is_deleted: true, deleted_at: now, deleted_by: user.id })
+    .eq('id', poId)
+
+  if (updateError) return { error: updateError.message }
+
+  await logAction({
+    supabase, userId: user.id, userRole: role,
+    action:    ACTION_TYPES.PO_DELETED,
+    tableName: 'purchase_orders',
+    recordId:  poId,
+    oldValue:  { status: po.status, po_number: po.po_number },
+    newValue:  { is_deleted: true, deleted_at: now },
+  })
+
+  PO_PATHS.forEach(p => revalidatePath(p))
+  return { error: null }
+}
+
+// ─── 14. getPOItemsWithReceipt ────────────────────────────────────────────────
+// Returns all line items for a PO enriched with cumulative received_qty
+// (summed across all non-deleted GRNs for this PO).
+// grn_items.quantity is the column name (not quantity_received).
+
+export interface POItemWithReceipt {
+  id:            string
+  medicine_id:   string
+  medicine_name: string
+  medicine_code: string | null
+  ordered_qty:   number
+  received_qty:  number
+  unit_price:    number
+  total_price:   number
+}
+
+export async function getPOItemsWithReceipt(
+  poId: string,
+): Promise<{ data?: POItemWithReceipt[]; error: string | null }> {
+  const { supabase, user } = await getCallerContext()
+  if (!user) return { error: 'Not authenticated' }
+
+  // 1. PO items with medicine name/code
+  const { data: poItems, error: poErr } = await supabase
+    .from('purchase_order_items')
+    .select('id, medicine_id, quantity, unit_price, medicines:medicine_id(name, code)')
+    .eq('po_id', poId)
+    .order('created_at', { ascending: true })
+
+  if (poErr) return { error: poErr.message }
+
+  // 2. GRN IDs for this PO
+  const { data: grns, error: grnsErr } = await supabase
+    .from('goods_receipts')
+    .select('id')
+    .eq('po_id', poId)
+    .eq('is_deleted', false)
+
+  if (grnsErr) return { error: grnsErr.message }
+
+  // 3. Sum received qty per medicine_id across all GRNs for this PO
+  const receivedMap = new Map<string, number>()
+  if (grns && grns.length > 0) {
+    const grnIds = (grns as { id: string }[]).map(g => g.id)
+    const { data: grnItems, error: giErr } = await supabase
+      .from('grn_items')
+      .select('medicine_id, quantity')
+      .in('grn_id', grnIds)
+
+    if (giErr) return { error: giErr.message }
+    ;(grnItems ?? []).forEach((gi: { medicine_id: string; quantity: number }) => {
+      receivedMap.set(gi.medicine_id, (receivedMap.get(gi.medicine_id) ?? 0) + gi.quantity)
+    })
+  }
+
+  const items: POItemWithReceipt[] = (poItems ?? []).map(item => {
+    const med = item.medicines as { name: string; code: string | null } | { name: string; code: string | null }[] | null
+    const medicine = Array.isArray(med) ? med[0] : med
+    return {
+      id:            item.id as string,
+      medicine_id:   item.medicine_id as string,
+      medicine_name: medicine?.name ?? 'Unknown',
+      medicine_code: medicine?.code ?? null,
+      ordered_qty:   item.quantity as number,
+      received_qty:  receivedMap.get(item.medicine_id as string) ?? 0,
+      unit_price:    item.unit_price as number,
+      total_price:   (item.quantity as number) * (item.unit_price as number),
+    }
+  })
+
+  return { data: items, error: null }
 }

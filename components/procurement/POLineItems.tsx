@@ -5,8 +5,9 @@ import { Plus, Trash2, Search, CheckCircle2 } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { FONT, TEXT, PAGE } from '@/lib/design-tokens'
-import { addPOItem, removePOItem } from '@/app/actions/procurement'
+import { addPOItem, removePOItem, updatePOItem } from '@/app/actions/procurement'
 import type { POStatus } from '@/lib/db-types'
+import type { POItemWithReceipt } from '@/app/actions/procurement'
 
 // ─── Public types (used by server pages) ────────────────────────────────────
 
@@ -29,37 +30,46 @@ export interface MedicineLookup {
 // ─── Internal types ──────────────────────────────────────────────────────────
 
 interface LocalItem extends POItemRow {
-  isOptimistic?: boolean   // pending server confirmation
-  isRemoving?:   boolean   // pending server removal
+  isOptimistic?: boolean
+  isRemoving?:   boolean
+  draftQty?:     string
+  draftPrice?:   string
 }
 
 interface POLineItemsProps {
-  poId:      string
-  status:    POStatus
-  items:     POItemRow[]
-  medicines: MedicineLookup[]
-  canWrite:  boolean
+  poId:                string
+  status:              POStatus
+  items:               POItemRow[]
+  medicines:           MedicineLookup[]
+  canWrite:            boolean
+  receivedItems?:      POItemWithReceipt[]
+  receivedItemsLoading?: boolean
 }
+
+const EDITABLE_STATUSES: POStatus[] = ['draft', 'pending_approval', 'confirmed']
+const RECEIPT_STATUS_STATES: POStatus[] = ['partially_received', 'received', 'closed_short']
 
 // ─── Add Item Form ───────────────────────────────────────────────────────────
 
 function AddItemForm({
   poId,
   medicines,
+  existingMedicineIds,
   onItemAdded,
   onDismiss,
 }: {
-  poId:        string
-  medicines:   MedicineLookup[]
-  onItemAdded: (tempId: string, medicine: MedicineLookup, qty: number, price: number) => void
-  onDismiss:   () => void
+  poId:                string
+  medicines:           MedicineLookup[]
+  existingMedicineIds: string[]
+  onItemAdded:         (tempId: string, medicine: MedicineLookup, qty: number, price: number) => void
+  onDismiss:           () => void
 }) {
-  const [search,      setSearch]      = useState('')
-  const [selected,    setSelected]    = useState<MedicineLookup | null>(null)
-  const [showDrop,    setShowDrop]    = useState(false)
-  const [qtyStr,      setQtyStr]      = useState('')
-  const [priceStr,    setPriceStr]    = useState('')
-  const [error,       setError]       = useState<string | null>(null)
+  const [search,       setSearch]       = useState('')
+  const [selected,     setSelected]     = useState<MedicineLookup | null>(null)
+  const [showDrop,     setShowDrop]     = useState(false)
+  const [qtyStr,       setQtyStr]       = useState('')
+  const [priceStr,     setPriceStr]     = useState('')
+  const [error,        setError]        = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const searchRef = useRef<HTMLInputElement>(null)
@@ -74,7 +84,6 @@ function AddItemForm({
         .slice(0, 8)
     : []
 
-  // Close dropdown on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (dropRef.current && !dropRef.current.contains(e.target as Node)) {
@@ -95,36 +104,35 @@ function AddItemForm({
     setError(null)
     if (!selected) { setError('Select a medicine first'); return }
 
+    if (existingMedicineIds.includes(selected.id)) {
+      setError('This medicine is already in the order')
+      return
+    }
+
     const qty   = parseInt(qtyStr, 10)
     const price = parseFloat(priceStr)
     if (isNaN(qty) || qty <= 0)     { setError('Quantity must be a positive integer'); return }
     if (isNaN(price) || price <= 0) { setError('Unit price must be positive'); return }
 
-    const tempId = `temp-${Date.now()}`
+    const tempId  = `temp-${Date.now()}`
     const medicine = selected
 
-    // 1. Notify parent immediately — optimistic insert
     onItemAdded(tempId, medicine, qty, price)
 
-    // 2. Clear form right away
     setSelected(null)
     setSearch('')
     setQtyStr('')
     setPriceStr('')
     setIsSubmitting(true)
 
-    // 3. Auto-focus search for next item
     setTimeout(() => searchRef.current?.focus(), 50)
 
-    // 4. Fire server action in background (no await at call site)
     addPOItem(poId, medicine.id, qty, price).then(result => {
       setIsSubmitting(false)
       if (result.error) {
-        // Parent will roll back the optimistic item
         onItemAdded(`rollback:${tempId}`, medicine, qty, price)
         setError(result.error)
       } else if (result.data?.id) {
-        // Replace temp ID with real server ID
         onItemAdded(`confirm:${tempId}:${result.data.id}`, medicine, qty, price)
       }
     })
@@ -147,7 +155,6 @@ function AddItemForm({
       </div>
 
       <div className="space-y-3">
-        {/* Medicine typeahead */}
         <div className="relative" ref={dropRef}>
           <div className="relative">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#9ca3af] pointer-events-none" />
@@ -209,41 +216,127 @@ function AddItemForm({
   )
 }
 
+// ─── Receipt status badge ────────────────────────────────────────────────────
+
+function ReceiptBadge({ orderedQty, receivedQty }: { orderedQty: number; receivedQty: number }) {
+  if (receivedQty >= orderedQty) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full font-medium whitespace-nowrap"
+        style={{ background: '#E1F5EE', color: '#0F6E56', fontSize: 10, padding: '2px 8px' }}
+      >
+        ✓ Fully Received
+      </span>
+    )
+  }
+  if (receivedQty > 0) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full font-medium whitespace-nowrap"
+        style={{ background: '#FFF3E0', color: '#B45309', fontSize: 10, padding: '2px 8px' }}
+      >
+        ⚠ Partial ({receivedQty}/{orderedQty})
+      </span>
+    )
+  }
+  return (
+    <span
+      className="inline-flex items-center rounded-full font-medium whitespace-nowrap"
+      style={{ background: '#FCEBEB', color: '#A32D2D', fontSize: 10, padding: '2px 8px' }}
+    >
+      ✗ Not Received
+    </span>
+  )
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-export function POLineItems({ poId, status, items, medicines, canWrite }: POLineItemsProps) {
-  // Optimistic local state — initialized from server items prop.
-  // Syncs to fresh server data only when `items` reference changes
-  // (i.e. after router.refresh() from confirmPO / cancelPO / createGRN).
-  const [localItems,   setLocalItems]   = useState<LocalItem[]>(items)
-  const [showAddForm,  setShowAddForm]  = useState(false)
-  const [removeError,  setRemoveError]  = useState<string | null>(null)
+function toLocal(item: POItemRow): LocalItem {
+  return { ...item, draftQty: String(item.quantity), draftPrice: String(item.unitPrice) }
+}
 
-  // Sync from server whenever parent refreshes
+export function POLineItems({
+  poId,
+  status,
+  items,
+  medicines,
+  canWrite,
+  receivedItems,
+  receivedItemsLoading = false,
+}: POLineItemsProps) {
+  const [localItems,  setLocalItems]  = useState<LocalItem[]>(() => items.map(toLocal))
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [removeError, setRemoveError] = useState<string | null>(null)
+
   useEffect(() => {
-    setLocalItems(items)
+    setLocalItems(items.map(toLocal))
   }, [items])
 
-  const isDraft = status === 'draft'
+  const isEditable      = EDITABLE_STATUSES.includes(status)
+  const showReceiptMode = RECEIPT_STATUS_STATES.includes(status)
 
-  // ── Optimistic add callback from AddItemForm ─────────────────────────────
-  //
-  // The form passes 3 kinds of messages via the same callback:
-  //   tempId starting with "rollback:" → remove the item that failed
-  //   tempId starting with "confirm:"  → replace temp ID with real ID
-  //   plain tempId                     → insert a new optimistic item
-  function handleItemMessage(
-    signal:   string,
-    medicine: MedicineLookup,
-    qty:      number,
-    price:    number,
-  ) {
+  const existingMedicineIds = localItems.map(i => i.medicineId)
+
+  // ── Draft input helpers ──────────────────────────────────────────────────
+
+  function setDraftQty(itemId: string, value: string) {
+    setLocalItems(prev => prev.map(i => i.id !== itemId ? i : { ...i, draftQty: value }))
+  }
+
+  function setDraftPrice(itemId: string, value: string) {
+    setLocalItems(prev => prev.map(i => i.id !== itemId ? i : { ...i, draftPrice: value }))
+  }
+
+  function commitQty(item: LocalItem) {
+    const val = Math.round(parseFloat(item.draftQty ?? ''))
+    if (!Number.isFinite(val) || val <= 0) {
+      setDraftQty(item.id, String(item.quantity))
+      return
+    }
+    if (val === item.quantity) return
+
+    setLocalItems(prev => prev.map(i => i.id !== item.id ? i : {
+      ...i, quantity: val, totalPrice: val * i.unitPrice, draftQty: String(val),
+    }))
+    updatePOItem(item.id, val, item.unitPrice).then(result => {
+      if (result.error) {
+        setLocalItems(prev => prev.map(i => i.id !== item.id ? i : {
+          ...i, quantity: item.quantity, totalPrice: item.quantity * item.unitPrice, draftQty: String(item.quantity),
+        }))
+        setRemoveError(result.error)
+      }
+    })
+  }
+
+  function commitPrice(item: LocalItem) {
+    const val = parseFloat(item.draftPrice ?? '')
+    if (!Number.isFinite(val) || val <= 0) {
+      setDraftPrice(item.id, String(item.unitPrice))
+      return
+    }
+    if (val === item.unitPrice) return
+
+    setLocalItems(prev => prev.map(i => i.id !== item.id ? i : {
+      ...i, unitPrice: val, totalPrice: i.quantity * val, draftPrice: String(val),
+    }))
+    updatePOItem(item.id, item.quantity, val).then(result => {
+      if (result.error) {
+        setLocalItems(prev => prev.map(i => i.id !== item.id ? i : {
+          ...i, unitPrice: item.unitPrice, totalPrice: item.quantity * item.unitPrice, draftPrice: String(item.unitPrice),
+        }))
+        setRemoveError(result.error)
+      }
+    })
+  }
+
+  // ── Optimistic add/remove callbacks ─────────────────────────────────────
+
+  function handleItemMessage(signal: string, medicine: MedicineLookup, qty: number, price: number) {
     if (signal.startsWith('rollback:')) {
       const tempId = signal.slice('rollback:'.length)
       setLocalItems(prev => prev.filter(i => i.id !== tempId))
       return
     }
-
     if (signal.startsWith('confirm:')) {
       const parts  = signal.split(':')
       const tempId = parts[1]
@@ -253,8 +346,6 @@ export function POLineItems({ poId, status, items, medicines, canWrite }: POLine
       )
       return
     }
-
-    // Plain tempId — insert optimistic item
     const tempId = signal
     const newItem: LocalItem = {
       id:           tempId,
@@ -269,21 +360,15 @@ export function POLineItems({ poId, status, items, medicines, canWrite }: POLine
     setLocalItems(prev => [...prev, newItem])
   }
 
-  // ── Optimistic remove ────────────────────────────────────────────────────
-
   function handleRemove(item: LocalItem) {
-    if (item.isOptimistic) return  // can't remove a not-yet-confirmed item
+    if (item.isOptimistic) return
     setRemoveError(null)
 
-    // Immediately remove from local state
     setLocalItems(prev => prev.filter(i => i.id !== item.id))
 
-    // Fire server action in background
     removePOItem(item.id).then(result => {
       if (result.error) {
-        // Restore the item on failure
         setLocalItems(prev => {
-          // Avoid double-insert if somehow it's already back
           if (prev.find(i => i.id === item.id)) return prev
           return [...prev, item]
         })
@@ -307,13 +392,86 @@ export function POLineItems({ poId, status, items, medicines, canWrite }: POLine
     verticalAlign: 'middle',
   }
 
+  // ── Receipt status table (partially_received / received / closed_short) ──
+
+  if (showReceiptMode) {
+    const displayItems = receivedItems ?? []
+    const total = displayItems.reduce((sum, i) => sum + i.total_price, 0)
+
+    return (
+      <div>
+        <p style={{ fontSize: 13, fontWeight: 600, color: TEXT.primary, marginBottom: 12 }}>Line Items</p>
+
+        {receivedItemsLoading || displayItems.length === 0 ? (
+          <div
+            className="text-center rounded-lg border border-dashed border-[rgba(0,0,0,0.12)]"
+            style={{ padding: '32px 16px', color: TEXT.secondary, fontSize: FONT.tableCell }}
+          >
+            {receivedItemsLoading ? 'Loading receipt data…' : 'No line items.'}
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Medicine</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Ordered</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Received</th>
+                  <th style={thStyle}>Status</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Unit Price</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayItems.map(item => (
+                  <tr key={item.id} className="hover:bg-[#f9fafb] transition-colors">
+                    <td style={tdStyle}>
+                      <p className="font-medium">{item.medicine_name}</p>
+                      {item.medicine_code && (
+                        <p className="text-[10px] text-[#9ca3af] font-mono">{item.medicine_code}</p>
+                      )}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{item.ordered_qty}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{item.received_qty}</td>
+                    <td style={tdStyle}>
+                      <ReceiptBadge orderedQty={item.ordered_qty} receivedQty={item.received_qty} />
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>
+                      Rs {item.unit_price.toLocaleString('en-PK', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 500 }}>
+                      Rs {item.total_price.toLocaleString('en-PK', { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ background: '#f9fafb' }}>
+                  <td
+                    colSpan={5}
+                    style={{ ...tdStyle, fontWeight: 600, textAlign: 'right', borderBottom: 'none' }}
+                  >
+                    Total
+                  </td>
+                  <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'right', borderBottom: 'none', fontSize: 13, color: '#0F6E56' }}>
+                    Rs {total.toLocaleString('en-PK', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── Editable / read-only table ────────────────────────────────────────────
+
   const total = localItems.reduce((sum, i) => sum + i.totalPrice, 0)
 
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
         <p style={{ fontSize: 13, fontWeight: 600, color: TEXT.primary }}>Line Items</p>
-        {isDraft && canWrite && !showAddForm && (
+        {isEditable && canWrite && !showAddForm && (
           <Button
             variant="secondary"
             size="sm"
@@ -336,7 +494,7 @@ export function POLineItems({ poId, status, items, medicines, canWrite }: POLine
           className="text-center rounded-lg border border-dashed border-[rgba(0,0,0,0.12)]"
           style={{ padding: '32px 16px', color: TEXT.secondary, fontSize: FONT.tableCell }}
         >
-          No line items yet.{isDraft && canWrite ? ' Use "Add Item" above.' : ''}
+          No line items yet.{isEditable && canWrite ? ' Use "Add Item" above.' : ''}
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
@@ -347,7 +505,7 @@ export function POLineItems({ poId, status, items, medicines, canWrite }: POLine
                 <th style={{ ...thStyle, textAlign: 'right' }}>Qty</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>Unit Price</th>
                 <th style={{ ...thStyle, textAlign: 'right' }}>Total</th>
-                {isDraft && canWrite && <th style={{ ...thStyle, textAlign: 'right' }}>Remove</th>}
+                {isEditable && canWrite && <th style={{ ...thStyle, textAlign: 'right' }}>Remove</th>}
               </tr>
             </thead>
             <tbody>
@@ -356,8 +514,8 @@ export function POLineItems({ poId, status, items, medicines, canWrite }: POLine
                   key={item.id}
                   className="transition-colors"
                   style={{
-                    background:   item.isOptimistic ? '#f0fdf4' : undefined,
-                    opacity:      item.isRemoving   ? 0.4 : 1,
+                    background: item.isOptimistic ? '#f0fdf4' : undefined,
+                    opacity:    item.isRemoving   ? 0.4 : 1,
                   }}
                 >
                   <td style={tdStyle}>
@@ -369,16 +527,49 @@ export function POLineItems({ poId, status, items, medicines, canWrite }: POLine
                       <p className="text-[10px] text-[#0F6E56]">Saving…</p>
                     )}
                   </td>
-                  <td style={{ ...tdStyle, textAlign: 'right' }}>{item.quantity}</td>
                   <td style={{ ...tdStyle, textAlign: 'right' }}>
-                    Rs {item.unitPrice.toLocaleString('en-PK', { minimumFractionDigits: 2 })}
+                    {isEditable && canWrite && !item.isOptimistic ? (
+                      <input
+                        type="number" min="1" step="1"
+                        value={item.draftQty ?? String(item.quantity)}
+                        onChange={e => setDraftQty(item.id, e.target.value)}
+                        onBlur={() => commitQty(item)}
+                        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                        style={{
+                          width: 70, textAlign: 'right', fontSize: 12,
+                          padding: '3px 6px', borderRadius: 5, outline: 'none',
+                          border: '1px solid rgba(0,0,0,0.18)', background: '#fff',
+                        }}
+                        className="focus:border-[#0F6E56] focus:ring-1 focus:ring-[#0F6E56]"
+                      />
+                    ) : (
+                      <span>{item.quantity}</span>
+                    )}
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>
+                    {isEditable && canWrite && !item.isOptimistic ? (
+                      <input
+                        type="number" min="0.01" step="0.01"
+                        value={item.draftPrice ?? String(item.unitPrice)}
+                        onChange={e => setDraftPrice(item.id, e.target.value)}
+                        onBlur={() => commitPrice(item)}
+                        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                        style={{
+                          width: 88, textAlign: 'right', fontSize: 12,
+                          padding: '3px 6px', borderRadius: 5, outline: 'none',
+                          border: '1px solid rgba(0,0,0,0.18)', background: '#fff',
+                        }}
+                        className="focus:border-[#0F6E56] focus:ring-1 focus:ring-[#0F6E56]"
+                      />
+                    ) : (
+                      <span>Rs {item.unitPrice.toLocaleString('en-PK', { minimumFractionDigits: 2 })}</span>
+                    )}
                   </td>
                   <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 500 }}>
                     Rs {item.totalPrice.toLocaleString('en-PK', { minimumFractionDigits: 2 })}
                   </td>
-                  {isDraft && canWrite && (
+                  {isEditable && canWrite && (
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
-                      {/* Can't remove an unconfirmed optimistic item */}
                       {!item.isOptimistic && (
                         <button
                           onClick={() => handleRemove(item)}
@@ -393,7 +584,6 @@ export function POLineItems({ poId, status, items, medicines, canWrite }: POLine
                 </tr>
               ))}
 
-              {/* Running total */}
               <tr style={{ background: '#f9fafb' }}>
                 <td
                   colSpan={3}
@@ -404,17 +594,18 @@ export function POLineItems({ poId, status, items, medicines, canWrite }: POLine
                 <td style={{ ...tdStyle, fontWeight: 700, textAlign: 'right', borderBottom: 'none', fontSize: 13, color: '#0F6E56' }}>
                   Rs {total.toLocaleString('en-PK', { minimumFractionDigits: 2 })}
                 </td>
-                {isDraft && canWrite && <td style={{ ...tdStyle, borderBottom: 'none' }} />}
+                {isEditable && canWrite && <td style={{ ...tdStyle, borderBottom: 'none' }} />}
               </tr>
             </tbody>
           </table>
         </div>
       )}
 
-      {isDraft && canWrite && showAddForm && (
+      {isEditable && canWrite && showAddForm && (
         <AddItemForm
           poId={poId}
           medicines={medicines}
+          existingMedicineIds={existingMedicineIds}
           onItemAdded={handleItemMessage}
           onDismiss={() => setShowAddForm(false)}
         />

@@ -4,10 +4,11 @@ import React, { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { FONT, TEXT, PAGE } from '@/lib/design-tokens'
-import { cancelPO } from '@/app/actions/procurement'
+import { cancelPO, revertPOToDraft, softDeletePO } from '@/app/actions/procurement'
 import { POStatusBadge } from './POStatusBadge'
 import type { POStatus } from '@/lib/db-types'
 
@@ -25,27 +26,35 @@ export interface POListRow {
 type StatusFilter = 'all' | POStatus
 
 interface POTableProps {
-  pos:       POListRow[]
-  suppliers: { id: string; name: string }[]
-  basePath:  string    // e.g. '/admin/purchase-orders'
-  canWrite:  boolean
+  pos:           POListRow[]
+  suppliers:     { id: string; name: string }[]
+  basePath:      string
+  canWrite:      boolean
+  isSuperAdmin?: boolean
 }
 
 const STATUS_TABS: { label: string; value: StatusFilter }[] = [
-  { label: 'All',      value: 'all' },
-  { label: 'Draft',    value: 'draft' },
-  { label: 'Pending',  value: 'pending_approval' },
-  { label: 'Confirmed',value: 'confirmed' },
-  { label: 'Received', value: 'received' },
-  { label: 'Cancelled',value: 'cancelled' },
+  { label: 'All',          value: 'all' },
+  { label: 'Draft',        value: 'draft' },
+  { label: 'Pending',      value: 'pending_approval' },
+  { label: 'Confirmed',    value: 'confirmed' },
+  { label: 'Partial',      value: 'partially_received' },
+  { label: 'Received',     value: 'received' },
+  { label: 'Cancelled',    value: 'cancelled' },
+  { label: 'Closed Short', value: 'closed_short' },
 ]
 
-export function POTable({ pos, suppliers, basePath, canWrite }: POTableProps) {
+const EDITABLE_STATUSES: POStatus[] = ['draft', 'pending_approval', 'confirmed']
+
+type DialogType = 'revert' | 'delete'
+
+export function POTable({ pos, suppliers, basePath, canWrite, isSuperAdmin = false }: POTableProps) {
   const router = useRouter()
   const [statusFilter,   setStatusFilter]   = useState<StatusFilter>('all')
   const [supplierFilter, setSupplierFilter] = useState('')
   const [isPending,      startTransition]   = useTransition()
-  const [cancelError,    setCancelError]    = useState<string | null>(null)
+  const [actionError,    setActionError]    = useState<string | null>(null)
+  const [dialog, setDialog] = useState<{ type: DialogType; poId: string } | null>(null)
 
   const filtered = useMemo(() => {
     return pos.filter(p => {
@@ -56,10 +65,34 @@ export function POTable({ pos, suppliers, basePath, canWrite }: POTableProps) {
   }, [pos, statusFilter, supplierFilter])
 
   function handleCancel(poId: string) {
-    setCancelError(null)
+    setActionError(null)
     startTransition(async () => {
       const result = await cancelPO(poId)
-      if (result.error) { setCancelError(result.error); return }
+      if (result.error) { setActionError(result.error); return }
+      router.refresh()
+    })
+  }
+
+  function handleRevert() {
+    if (!dialog) return
+    const { poId } = dialog
+    setDialog(null)
+    setActionError(null)
+    startTransition(async () => {
+      const result = await revertPOToDraft(poId)
+      if (result.error) { setActionError(result.error); return }
+      router.refresh()
+    })
+  }
+
+  function handleDelete() {
+    if (!dialog) return
+    const { poId } = dialog
+    setDialog(null)
+    setActionError(null)
+    startTransition(async () => {
+      const result = await softDeletePO(poId)
+      if (result.error) { setActionError(result.error); return }
       router.refresh()
     })
   }
@@ -82,7 +115,6 @@ export function POTable({ pos, suppliers, basePath, canWrite }: POTableProps) {
     <div>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 mb-3">
-        {/* Status tabs */}
         <div className="flex gap-1 bg-[#f3f4f6] rounded-md p-0.5 flex-wrap">
           {STATUS_TABS.map(tab => (
             <button
@@ -101,7 +133,6 @@ export function POTable({ pos, suppliers, basePath, canWrite }: POTableProps) {
           ))}
         </div>
 
-        {/* Supplier filter */}
         <select
           value={supplierFilter}
           onChange={e => setSupplierFilter(e.target.value)}
@@ -114,9 +145,9 @@ export function POTable({ pos, suppliers, basePath, canWrite }: POTableProps) {
         </select>
       </div>
 
-      {cancelError && (
+      {actionError && (
         <p className="text-[11px] text-[#A32D2D] bg-rose-50 border border-rose-200 rounded px-3 py-2 mb-3">
-          {cancelError}
+          {actionError}
         </p>
       )}
 
@@ -146,7 +177,14 @@ export function POTable({ pos, suppliers, basePath, canWrite }: POTableProps) {
               </tr>
             ) : (
               filtered.map(po => {
-                const canCancel = canWrite && (po.status === 'draft' || po.status === 'confirmed')
+                const isEditable         = EDITABLE_STATUSES.includes(po.status)
+                const canEdit            = isEditable && canWrite
+                const canCancel          = (po.status === 'draft' || po.status === 'confirmed') && canWrite
+                const canAddGRN          = po.status === 'partially_received'
+                const canRevertConfirmed = po.status === 'confirmed' && canWrite
+                const canRevertCancelled = po.status === 'cancelled' && isSuperAdmin
+                const canDelete          = (po.status === 'cancelled' || po.status === 'closed_short') && isSuperAdmin
+
                 return (
                   <tr key={po.id} className="hover:bg-[#f9fafb] transition-colors">
                     <td style={tdStyle}>
@@ -166,13 +204,66 @@ export function POTable({ pos, suppliers, basePath, canWrite }: POTableProps) {
                       {new Date(po.created_at).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Link
-                          href={`${basePath}/${po.id}`}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium text-[#0F6E56] hover:underline"
-                        >
-                          View <ExternalLink size={10} />
-                        </Link>
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                        {/* Primary: Edit for editable+canWrite, View otherwise */}
+                        {canEdit ? (
+                          <Link
+                            href={`${basePath}/${po.id}`}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-[#185FA5] hover:underline"
+                          >
+                            Edit <Pencil size={10} />
+                          </Link>
+                        ) : (
+                          <Link
+                            href={`${basePath}/${po.id}`}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-[#0F6E56] hover:underline"
+                          >
+                            View <ExternalLink size={10} />
+                          </Link>
+                        )}
+
+                        {canAddGRN && (
+                          <Link
+                            href={`${basePath}/${po.id}`}
+                            className="inline-flex items-center gap-1 text-[11px] font-medium text-[#0F6E56] hover:underline"
+                          >
+                            + GRN <ExternalLink size={10} />
+                          </Link>
+                        )}
+
+                        {canRevertConfirmed && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={isPending}
+                            onClick={() => setDialog({ type: 'revert', poId: po.id })}
+                          >
+                            Revert
+                          </Button>
+                        )}
+
+                        {canRevertCancelled && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={isPending}
+                            onClick={() => setDialog({ type: 'revert', poId: po.id })}
+                          >
+                            Revert
+                          </Button>
+                        )}
+
+                        {canDelete && (
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            disabled={isPending}
+                            onClick={() => setDialog({ type: 'delete', poId: po.id })}
+                          >
+                            Delete
+                          </Button>
+                        )}
+
                         {canCancel && (
                           <Button
                             variant="ghost"
@@ -192,6 +283,30 @@ export function POTable({ pos, suppliers, basePath, canWrite }: POTableProps) {
           </tbody>
         </table>
       </div>
+
+      {/* Revert to Draft confirmation */}
+      <ConfirmDialog
+        open={dialog?.type === 'revert'}
+        onClose={() => setDialog(null)}
+        onConfirm={handleRevert}
+        title="Revert to Draft"
+        message="Revert this PO to draft? It will need to go through approval again."
+        confirmLabel="Revert to Draft"
+        confirmVariant="secondary"
+        loading={isPending}
+      />
+
+      {/* Delete PO confirmation */}
+      <ConfirmDialog
+        open={dialog?.type === 'delete'}
+        onClose={() => setDialog(null)}
+        onConfirm={handleDelete}
+        title="Delete Purchase Order"
+        message="Permanently hide this PO? It will no longer appear in any list. This cannot be undone from the UI."
+        confirmLabel="Delete PO"
+        confirmVariant="danger"
+        loading={isPending}
+      />
     </div>
   )
 }

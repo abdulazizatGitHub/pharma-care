@@ -1,19 +1,21 @@
 'use client'
 
-import React, { useState, useTransition } from 'react'
+import React, { useState, useMemo, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Plus, LayoutList, Upload } from 'lucide-react'
+import { Plus, LayoutList, Upload, FlaskConical } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { useDashboardUser } from '@/lib/dashboard-context'
 import { hasPermission } from '@/lib/permissions'
 import { FONT, PAGE, TEXT } from '@/lib/design-tokens'
 import { deactivateMedicine, reactivateMedicine } from '@/app/actions/medicines'
-import { MedicineTable }    from './MedicineTable'
-import { MedicineDrawer }   from './MedicineDrawer'
-import { CategoryManager }  from './CategoryManager'
-import { BulkImportModal }     from './BulkImportModal'
-import { MedicineStockPanel }  from './MedicineStockPanel'
+import { MedicineTable }         from './MedicineTable'
+import { MedicineDrawer }        from './MedicineDrawer'
+import { CategoryManager }       from './CategoryManager'
+import { GenericNamesManager }   from './GenericNamesManager'
+import { BulkImportModal }       from './BulkImportModal'
+import { MedicineStockPanel }    from './MedicineStockPanel'
 import type { MedicineCategory, MedicineSubcategory, MedicineRow, Supplier } from '@/lib/db-types'
+import type { GenericNameOption } from './GenericNameCombobox'
 
 // Re-export so server pages can import MedicineRow from here for backwards compatibility
 export type { MedicineRow }
@@ -24,24 +26,35 @@ interface MedicinesPageProps {
   medicines:     MedicineRow[]
   categories:    MedicineCategory[]
   subcategories: MedicineSubcategory[]
+  genericNames:  GenericNameOption[]
   suppliers:     Supplier[]
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function MedicinesPage({ medicines, categories, subcategories, suppliers }: MedicinesPageProps) {
+export function MedicinesPage({ medicines, categories, subcategories, genericNames, suppliers }: MedicinesPageProps) {
   const router = useRouter()
   const { role, permissions } = useDashboardUser()
 
   const canWrite = role === 'superadmin' || hasPermission(permissions, 'inventory_manage')
 
-  const [selectedMedicine, setSelectedMedicine] = useState<MedicineRow | null>(null)
-  const [drawerOpen,       setDrawerOpen]       = useState(false)
-  const [catModalOpen,      setCatModalOpen]      = useState(false)
-  const [importModalOpen,   setImportModalOpen]   = useState(false)
-  const [stockPanelMedicine, setStockPanelMedicine] = useState<MedicineRow | null>(null)
-  const [deactivateError,   setDeactivateError]   = useState<string | null>(null)
-  const [isPending,        startTransition]     = useTransition()
+  const [selectedMedicine,    setSelectedMedicine]    = useState<MedicineRow | null>(null)
+  const [drawerOpen,          setDrawerOpen]          = useState(false)
+  const [catModalOpen,        setCatModalOpen]        = useState(false)
+  const [gnModalOpen,         setGnModalOpen]         = useState(false)
+  const [importModalOpen,     setImportModalOpen]     = useState(false)
+  const [stockPanelMedicine,  setStockPanelMedicine]  = useState<MedicineRow | null>(null)
+  const [deactivateError,     setDeactivateError]     = useState<string | null>(null)
+  const [isPending,           startTransition]        = useTransition()
+
+  // Augment generic names with medicine usage counts (computed from already-fetched medicines)
+  const genericNamesWithCount = useMemo(() => {
+    const counts = new Map<string, number>()
+    medicines.forEach(m => {
+      if (m.generic_name_id) counts.set(m.generic_name_id, (counts.get(m.generic_name_id) ?? 0) + 1)
+    })
+    return genericNames.map(g => ({ ...g, medicine_count: counts.get(g.id) ?? 0 }))
+  }, [medicines, genericNames])
 
   function openAddDrawer() {
     setSelectedMedicine(null)
@@ -107,6 +120,14 @@ export function MedicinesPage({ medicines, categories, subcategories, suppliers 
               <Button
                 variant="secondary"
                 size="md"
+                icon={<FlaskConical size={14} />}
+                onClick={() => setGnModalOpen(true)}
+              >
+                Generic Names
+              </Button>
+              <Button
+                variant="secondary"
+                size="md"
                 icon={<Upload size={14} />}
                 onClick={() => setImportModalOpen(true)}
               >
@@ -152,6 +173,7 @@ export function MedicinesPage({ medicines, categories, subcategories, suppliers 
           medicine={selectedMedicine}
           categories={categories}
           subcategories={subcategories}
+          genericNames={genericNames}
           onClose={closeDrawer}
         />
       )}
@@ -162,6 +184,14 @@ export function MedicinesPage({ medicines, categories, subcategories, suppliers 
           categories={categories}
           subcategories={subcategories}
           onClose={() => setCatModalOpen(false)}
+        />
+      )}
+
+      {/* Generic names manager modal */}
+      {gnModalOpen && (
+        <GenericNamesManager
+          genericNames={genericNamesWithCount}
+          onClose={() => setGnModalOpen(false)}
         />
       )}
 

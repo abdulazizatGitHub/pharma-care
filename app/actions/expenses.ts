@@ -29,7 +29,13 @@ function canAccessExpenses(role: UserRole | null): boolean {
   return role === 'superadmin' || role === 'admin'
 }
 
-const EXPENSE_PATHS = ['/superadmin/expenses', '/admin/expenses', '/superadmin/dashboard']
+const EXPENSE_PATHS = [
+  '/superadmin/expenses',
+  '/admin/expenses',
+  '/superadmin/dashboard',
+  '/superadmin/ledger/cashbook',
+  '/superadmin/ledger/journal',
+]
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -242,6 +248,7 @@ export async function getExpenseSummary(
     .from('expenses')
     .select('account_code, amount')
     .eq('is_deleted', false)
+    .eq('is_voided', false)
     .gte('expense_date', dateFrom)
     .lte('expense_date', dateTo)
     .not('account_code', 'is', null)
@@ -317,6 +324,180 @@ export async function softDeleteExpense(
     tableName: 'expenses',
     recordId:  expenseId,
     newValue:  { is_deleted: true },
+  })
+
+  EXPENSE_PATHS.forEach(p => revalidatePath(p))
+  return { error: null }
+}
+
+// ─── 5. updateExpenseDetails ──────────────────────────────────────────────────
+// superadmin only.
+// Edits cosmetic fields only — description, reference_no, category.
+// Amount, account_code, expense_date, payment_method, and journal_entry_id
+// are intentionally excluded and will never be touched by this action.
+
+const UpdateExpenseDetailsSchema = z.object({
+  description:  z.string().max(500).optional(),
+  reference_no: z.string().max(100).optional(),
+  category:     z.string().max(100).optional(),
+})
+
+export async function updateExpenseDetails(
+  expenseId: string,
+  fields: { description?: string; reference_no?: string; category?: string },
+): Promise<{ error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role)        return { error: 'Not authenticated' }
+  if (role !== 'superadmin') return { error: 'Only superadmin can edit expense details' }
+
+  const parsed = UpdateExpenseDetailsSchema.safeParse(fields)
+  if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+  const { data: expense } = await supabase
+    .from('expenses')
+    .select('id, description, reference_no, category')
+    .eq('id', expenseId)
+    .eq('is_deleted', false)
+    .maybeSingle()
+
+  if (!expense) return { error: 'Expense not found' }
+
+  const patch: Record<string, string | undefined> = {}
+  if (parsed.data.description  !== undefined) patch.description  = parsed.data.description
+  if (parsed.data.reference_no !== undefined) patch.reference_no = parsed.data.reference_no
+  if (parsed.data.category     !== undefined) patch.category     = parsed.data.category
+
+  if (Object.keys(patch).length === 0) return { error: null }
+
+  const { error: updateErr } = await supabase
+    .from('expenses')
+    .update(patch)
+    .eq('id', expenseId)
+
+  if (updateErr) return { error: updateErr.message }
+
+  await logAction({
+    supabase, userId: user.id, userRole: role,
+    action:    ACTION_TYPES.EDIT_EXPENSE,
+    tableName: 'expenses',
+    recordId:  expenseId,
+    oldValue:  { description: expense.description, reference_no: expense.reference_no, category: expense.category },
+    newValue:  patch,
+  })
+
+  EXPENSE_PATHS.forEach(p => revalidatePath(p))
+  return { error: null }
+}
+
+// ─── 6. voidExpense ───────────────────────────────────────────────────────────
+// superadmin only.
+// Reverses the original journal entry, links the two entries via
+// mark_entry_reversed(), then marks the expense row as voided.
+// The expense remains visible in the list with a "Voided" badge.
+// Requires migration 026 (is_voided, voided_at, voided_by, void_journal_entry_id).
+
+export async function voidExpense(
+  expenseId: string,
+): Promise<{ error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role)        return { error: 'Not authenticated' }
+  if (role !== 'superadmin') return { error: 'Only superadmin can void expenses' }
+
+  const { data: expense } = await supabase
+    .from('expenses')
+    .select('id, is_voided, journal_entry_id, description')
+    .eq('id', expenseId)
+    .eq('is_deleted', false)
+    .maybeSingle()
+
+  if (!expense) return { error: 'Expense not found' }
+  if (expense.is_voided) return { error: 'This expense has already been voided' }
+  if (!expense.journal_entry_id) {
+    return { error: 'Cannot void an expense with no posted journal entry — delete it instead' }
+  }
+
+  const { data: originalEntry } = await supabase
+    .from('journal_entries')
+    .select('description')
+    .eq('id', expense.journal_entry_id)
+    .maybeSingle()
+
+  type RawLine = {
+    amount:      number
+    direction:   string
+    amount_pkr:  number
+    party_type:  string | null
+    party_id:    string | null
+    description: string | null
+    accounts:    { code: string }
+  }
+
+  const { data: lines, error: linesErr } = await supabase
+    .from('journal_lines')
+    .select('amount, direction, amount_pkr, party_type, party_id, description, accounts(code)')
+    .eq('entry_id', expense.journal_entry_id)
+
+  if (linesErr || !lines || lines.length === 0) {
+    return { error: linesErr?.message ?? 'No journal lines found for this expense' }
+  }
+
+  const reversedLines = (lines as unknown as RawLine[]).map(l => ({
+    account_code: l.accounts.code,
+    direction:    l.direction === 'debit' ? 'credit' : 'debit',
+    amount:       l.amount.toString(),
+    ...(l.party_type ? { party_type: l.party_type } : {}),
+    ...(l.party_id   ? { party_id:   l.party_id   } : {}),
+    description:  l.description ? `[Void] ${l.description}` : '[Void]',
+  }))
+
+  const today    = new Date().toISOString().split('T')[0]
+  const voidDesc = `Void: ${originalEntry?.description ?? expense.description}`
+
+  const { data: reversalId, error: rpcError } = await supabase.rpc('post_journal_entry', {
+    p_entry_date:     today,
+    p_description:    voidDesc,
+    p_reference_type: 'expense_void',
+    p_reference_id:   expenseId,
+    p_currency:       'PKR',
+    p_exchange_rate:  1.0,
+    p_lines:          reversedLines,
+    p_created_by:     user.id,
+  })
+
+  if (rpcError || !reversalId) {
+    return { error: rpcError?.message ?? 'Failed to post reversal journal entry' }
+  }
+
+  const { error: markError } = await supabase.rpc('mark_entry_reversed', {
+    p_original_id: expense.journal_entry_id,
+    p_reversal_id: reversalId as string,
+  })
+
+  if (markError) {
+    console.error('[voidExpense] mark_entry_reversed failed:', markError.message,
+      '| reversal_id:', reversalId)
+    return { error: `Reversal entry created but linking failed: ${markError.message}` }
+  }
+
+  const { error: updateErr } = await supabase
+    .from('expenses')
+    .update({
+      is_voided:             true,
+      voided_at:             new Date().toISOString(),
+      voided_by:             user.id,
+      void_journal_entry_id: reversalId as string,
+    })
+    .eq('id', expenseId)
+
+  if (updateErr) return { error: updateErr.message }
+
+  await logAction({
+    supabase, userId: user.id, userRole: role,
+    action:    ACTION_TYPES.VOID_EXPENSE,
+    tableName: 'expenses',
+    recordId:  expenseId,
+    oldValue:  { is_voided: false, journal_entry_id: expense.journal_entry_id },
+    newValue:  { is_voided: true, void_journal_entry_id: reversalId as string },
   })
 
   EXPENSE_PATHS.forEach(p => revalidatePath(p))

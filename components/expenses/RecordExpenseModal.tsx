@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useTransition } from 'react'
+import React, { useState, useEffect, useTransition } from 'react'
 import { Modal }  from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input }  from '@/components/ui/Input'
@@ -15,12 +15,22 @@ const PAYMENT_METHODS = [
   { value: 'cheque',        label: 'Cheque' },
 ]
 
-interface Props {
-  open:    boolean
-  onClose: () => void
+export interface ExpenseInitialValues {
+  expense_date?:   string
+  account_code?:   string
+  amount?:         string
+  description?:    string
+  payment_method?: string
+  reference_no?:   string
 }
 
-export function RecordExpenseModal({ open, onClose }: Props) {
+interface Props {
+  open:           boolean
+  onClose:        () => void
+  initialValues?: ExpenseInitialValues
+}
+
+export function RecordExpenseModal({ open, onClose, initialValues }: Props) {
   const [date,          setDate]          = useState(TODAY)
   const [accountCode,   setAccountCode]   = useState('6000')
   const [amount,        setAmount]        = useState('')
@@ -29,6 +39,19 @@ export function RecordExpenseModal({ open, onClose }: Props) {
   const [referenceNo,   setReferenceNo]   = useState('')
   const [error,         setError]         = useState<string | null>(null)
   const [isPending,     startTransition]  = useTransition()
+
+  // Pre-fill form when modal opens with initial values (e.g. Void & Re-record)
+  useEffect(() => {
+    if (open && initialValues) {
+      if (initialValues.expense_date)   setDate(initialValues.expense_date)
+      if (initialValues.account_code)   setAccountCode(initialValues.account_code)
+      if (initialValues.amount)         setAmount(initialValues.amount)
+      if (initialValues.description)    setDescription(initialValues.description)
+      if (initialValues.payment_method) setPaymentMethod(initialValues.payment_method)
+      if (initialValues.reference_no)   setReferenceNo(initialValues.reference_no)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   function handleClose() {
     setDate(TODAY)

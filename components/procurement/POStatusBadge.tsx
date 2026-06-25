@@ -2,11 +2,13 @@ import React from 'react'
 import type { POStatus } from '@/lib/db-types'
 
 const CONFIG: Record<POStatus, { label: string; bg: string; color: string }> = {
-  draft:            { label: 'Draft',            bg: '#f3f4f6', color: '#374151' },
-  pending_approval: { label: 'Pending Approval', bg: '#FAEEDA', color: '#854F0B' },
-  confirmed:        { label: 'Confirmed',        bg: '#E6F1FB', color: '#185FA5' },
-  received:         { label: 'Received',         bg: '#E1F5EE', color: '#0F6E56' },
-  cancelled:        { label: 'Cancelled',        bg: '#FCEBEB', color: '#A32D2D' },
+  draft:               { label: 'Draft',            bg: '#f3f4f6', color: '#374151' },
+  pending_approval:    { label: 'Pending Approval', bg: '#FAEEDA', color: '#854F0B' },
+  confirmed:           { label: 'Confirmed',        bg: '#E6F1FB', color: '#185FA5' },
+  partially_received:  { label: 'Partial',          bg: '#FFF3E0', color: '#B45309' },
+  received:            { label: 'Received',         bg: '#E1F5EE', color: '#0F6E56' },
+  cancelled:           { label: 'Cancelled',        bg: '#FCEBEB', color: '#A32D2D' },
+  closed_short:        { label: 'Closed Short',     bg: '#F0F0F0', color: '#4B5563' },
 }
 
 interface POStatusBadgeProps {

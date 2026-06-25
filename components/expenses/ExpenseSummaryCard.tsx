@@ -79,6 +79,12 @@ export function ExpenseSummaryCard({ summary, monthLabel }: Props) {
           {fmtPKR(summary.grandTotal)}
         </span>
       </div>
+
+      <div style={{ padding: '6px 18px 8px', borderTop: '0.5px solid rgba(0,0,0,0.04)' }}>
+        <p style={{ fontSize: 10, color: '#9ca3af', margin: 0, fontStyle: 'italic' }}>
+          Voided expenses are excluded from totals.
+        </p>
+      </div>
     </div>
   )
 }

@@ -1,9 +1,12 @@
 'use client'
 
 import React, { useState, useTransition } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Pencil, XCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
-import { softDeleteExpense } from '@/app/actions/expenses'
+import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useToast } from '@/components/ui/Toast'
+import { softDeleteExpense, updateExpenseDetails, voidExpense } from '@/app/actions/expenses'
 import { EXPENSE_ACCOUNT_LABELS } from '@/lib/expense-constants'
 import type { ExpenseRow } from '@/app/actions/expenses'
 
@@ -25,16 +28,64 @@ const PAYMENT_LABELS: Record<string, string> = {
 }
 
 interface Props {
-  expenses:      ExpenseRow[]
-  isSuperadmin:  boolean
+  expenses:            ExpenseRow[]
+  isSuperadmin:        boolean
+  onVoidAndReRecord?:  (expense: ExpenseRow) => void
 }
 
-export function ExpenseTable({ expenses, isSuperadmin }: Props) {
+interface EditFields {
+  description:  string
+  reference_no: string
+  category:     string
+}
+
+export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Props) {
+  const { toast } = useToast()
   const [search,     setSearch]     = useState('')
   const [filterCode, setFilterCode] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteErr,  setDeleteErr]  = useState<Record<string, string>>({})
   const [isPending,  startTransition] = useTransition()
+
+  const [editTarget,  setEditTarget]  = useState<ExpenseRow | null>(null)
+  const [editFields,  setEditFields]  = useState<EditFields>({ description: '', reference_no: '', category: '' })
+  const [editErr,     setEditErr]     = useState<string | null>(null)
+  const [isSaving,    startSave]      = useTransition()
+
+  const [voidTarget,  setVoidTarget]  = useState<ExpenseRow | null>(null)
+  const [isVoiding,   startVoid]      = useTransition()
+
+  function openEdit(e: ExpenseRow) {
+    setEditTarget(e)
+    setEditFields({
+      description:  e.description  ?? '',
+      reference_no: e.reference_no ?? '',
+      category:     e.account_name ?? '',  // FIX 1: pre-populate from account_name (matches dropdown values)
+    })
+    setEditErr(null)
+  }
+
+  function closeEdit() {
+    setEditTarget(null)
+    setEditErr(null)
+  }
+
+  function handleSave() {
+    if (!editTarget) return
+    startSave(async () => {
+      const result = await updateExpenseDetails(editTarget.id, {
+        description:  editFields.description  || undefined,
+        reference_no: editFields.reference_no || undefined,
+        category:     editFields.category     || undefined,
+      })
+      if (result.error) {
+        setEditErr(result.error)
+      } else {
+        toast('Expense updated successfully', 'success')
+        closeEdit()
+      }
+    })
+  }
 
   // Client-side filters
   const visible = expenses.filter(e => {
@@ -51,6 +102,32 @@ export function ExpenseTable({ expenses, isSuperadmin }: Props) {
       setDeletingId(null)
       if (result.error) {
         setDeleteErr(prev => ({ ...prev, [id]: result.error! }))
+      }
+    })
+  }
+
+  function handleVoidConfirm() {
+    if (!voidTarget) return
+    const target = voidTarget
+    startVoid(async () => {
+      const result = await voidExpense(target.id)
+      setVoidTarget(null)
+      if (result.error) {
+        toast(result.error, 'error')
+      } else {
+        toast('Expense voided and journal entry reversed', 'success')
+      }
+    })
+  }
+
+  function handleVoidAndReRecord(expense: ExpenseRow) {
+    startVoid(async () => {
+      const result = await voidExpense(expense.id)
+      if (result.error) {
+        toast(result.error, 'error')
+      } else {
+        toast('Expense voided — fill in corrected values below', 'success')
+        onVoidAndReRecord?.(expense)
       }
     })
   }
@@ -103,7 +180,7 @@ export function ExpenseTable({ expenses, isSuperadmin }: Props) {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '0.5px solid rgba(0,0,0,0.08)', background: '#f9fafb' }}>
-              {['Date', 'Category', 'Description', 'Amount', 'Payment', 'Ref No', ...(isSuperadmin ? [''] : [])].map((h, i) => (
+              {['Date', 'Category', 'Description', 'Amount', 'Payment', 'Ref No', ...(isSuperadmin ? ['Actions'] : [])].map((h, i) => (
                 <th
                   key={h + i}
                   style={{
@@ -121,67 +198,246 @@ export function ExpenseTable({ expenses, isSuperadmin }: Props) {
             </tr>
           </thead>
           <tbody>
-            {visible.map((e, i) => (
-              <React.Fragment key={e.id}>
-                <tr
-                  style={{
-                    borderBottom: '0.5px solid rgba(0,0,0,0.05)',
-                    background: i % 2 === 0 ? '#fff' : '#fafafa',
-                  }}
-                >
-                  <td style={{ padding: '10px 12px', fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }}>
-                    {fmtDate(e.expense_date)}
-                  </td>
-                  <td style={{ padding: '10px 12px', fontSize: 12, color: '#374151' }}>
-                    {e.account_name ?? e.account_code ?? e.category}
-                  </td>
-                  <td style={{ padding: '10px 12px', fontSize: 12, color: '#111827', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {e.description}
-                  </td>
-                  <td style={{ padding: '10px 12px', fontSize: 12, textAlign: 'right', fontFamily: 'monospace', fontWeight: 500, color: '#A32D2D', whiteSpace: 'nowrap' }}>
-                    {fmtPKR(Number(e.amount))}
-                  </td>
-                  <td style={{ padding: '10px 12px', fontSize: 11, color: '#6b7280' }}>
-                    {PAYMENT_LABELS[e.payment_method ?? 'cash'] ?? e.payment_method ?? 'Cash'}
-                  </td>
-                  <td style={{ padding: '10px 12px', fontSize: 11, color: '#6b7280', fontFamily: 'monospace' }}>
-                    {e.reference_no ?? '—'}
-                  </td>
-                  {isSuperadmin && (
-                    <td style={{ padding: '10px 12px' }}>
-                      {/* Only show delete when no journal entry (unposted edge case) */}
-                      {!e.journal_entry_id && (
-                        <button
-                          title="Delete expense (no journal entry posted)"
-                          onClick={() => handleDelete(e.id)}
-                          disabled={isPending && deletingId === e.id}
-                          style={{
-                            background: 'none', border: 'none', cursor: 'pointer',
-                            color: '#9ca3af', padding: 4, borderRadius: 4,
-                            display: 'inline-flex', alignItems: 'center',
-                          }}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
+            {visible.map((e, i) => {
+              const voided = !!e.is_voided
+              const rowOpacity = voided ? 0.5 : 1
+              const textColor  = voided ? '#9ca3af' : undefined
+              return (
+                <React.Fragment key={e.id}>
+                  <tr
+                    style={{
+                      borderBottom: '0.5px solid rgba(0,0,0,0.05)',
+                      background: i % 2 === 0 ? '#fff' : '#fafafa',
+                      opacity: rowOpacity,
+                    }}
+                  >
+                    <td style={{ padding: '10px 12px', fontSize: 12, color: textColor ?? '#6b7280', whiteSpace: 'nowrap' }}>
+                      {fmtDate(e.expense_date)}
                     </td>
-                  )}
-                </tr>
-                {deleteErr[e.id] && (
-                  <tr>
-                    <td
-                      colSpan={isSuperadmin ? 7 : 6}
-                      style={{ padding: '4px 12px 8px', background: '#FCEBEB', fontSize: 11, color: '#A32D2D' }}
-                    >
-                      {deleteErr[e.id]}
+                    <td style={{ padding: '10px 12px', fontSize: 12, color: textColor ?? '#374151' }}>
+                      {e.account_name ?? e.account_code ?? e.category}
                     </td>
+                    <td style={{ padding: '10px 12px', fontSize: 12, color: textColor ?? '#111827', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {e.description}
+                    </td>
+                    <td style={{ padding: '10px 12px', fontSize: 12, textAlign: 'right', fontFamily: 'monospace', fontWeight: 500, color: voided ? '#9ca3af' : '#A32D2D', whiteSpace: 'nowrap' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        {voided && (
+                          <span style={{
+                            fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
+                            background: '#FCEBEB', color: '#A32D2D', borderRadius: 4,
+                            padding: '2px 5px', fontFamily: 'inherit',
+                          }}>
+                            Voided
+                          </span>
+                        )}
+                        {fmtPKR(Number(e.amount))}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 12px', fontSize: 11, color: textColor ?? '#6b7280' }}>
+                      {PAYMENT_LABELS[e.payment_method ?? 'cash'] ?? e.payment_method ?? 'Cash'}
+                    </td>
+                    <td style={{ padding: '10px 12px', fontSize: 11, color: textColor ?? '#6b7280', fontFamily: 'monospace' }}>
+                      {e.reference_no ?? '—'}
+                    </td>
+                    {isSuperadmin && (
+                      <td style={{ padding: '10px 12px' }}>
+                        {!voided && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            {/* Edit */}
+                            <button
+                              title="Edit expense details"
+                              onClick={() => openEdit(e)}
+                              style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: '#6b7280', padding: 4, borderRadius: 4,
+                                display: 'inline-flex', alignItems: 'center',
+                              }}
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            {/* Void */}
+                            <button
+                              title="Void this expense"
+                              onClick={() => setVoidTarget(e)}
+                              disabled={isVoiding}
+                              style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: '#A32D2D', padding: 4, borderRadius: 4,
+                                display: 'inline-flex', alignItems: 'center',
+                              }}
+                            >
+                              <XCircle size={13} />
+                            </button>
+                            {/* Void & Re-record */}
+                            <button
+                              title="Void and re-record with corrections"
+                              onClick={() => handleVoidAndReRecord(e)}
+                              disabled={isVoiding}
+                              style={{
+                                background: 'none', border: 'none', cursor: 'pointer',
+                                color: '#6b7280', padding: 4, borderRadius: 4,
+                                display: 'inline-flex', alignItems: 'center',
+                              }}
+                            >
+                              <RefreshCw size={13} />
+                            </button>
+                            {/* Delete (only for unposted edge case) */}
+                            {!e.journal_entry_id && (
+                              <button
+                                title="Delete expense (no journal entry posted)"
+                                onClick={() => handleDelete(e.id)}
+                                disabled={isPending && deletingId === e.id}
+                                style={{
+                                  background: 'none', border: 'none', cursor: 'pointer',
+                                  color: '#9ca3af', padding: 4, borderRadius: 4,
+                                  display: 'inline-flex', alignItems: 'center',
+                                }}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    )}
                   </tr>
-                )}
-              </React.Fragment>
-            ))}
+                  {deleteErr[e.id] && (
+                    <tr>
+                      <td
+                        colSpan={isSuperadmin ? 7 : 6}
+                        style={{ padding: '4px 12px 8px', background: '#FCEBEB', fontSize: 11, color: '#A32D2D' }}
+                      >
+                        {deleteErr[e.id]}
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              )
+            })}
           </tbody>
         </table>
       )}
+
+      {/* Edit Expense Modal */}
+      <Modal open={!!editTarget} onClose={closeEdit} title="Edit Expense" size="sm">
+        {editTarget && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+            {/* Read-only context block */}
+            <div style={{
+              background: '#f9fafb', border: '0.5px solid rgba(0,0,0,0.08)',
+              borderRadius: 8, padding: '12px 14px',
+              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px',
+            }}>
+              {[
+                { label: 'Date',         value: fmtDate(editTarget.expense_date) },
+                { label: 'Amount',       value: fmtPKR(Number(editTarget.amount)), valueColor: '#A32D2D' },
+                { label: 'Account',      value: editTarget.account_name ?? editTarget.account_code ?? '—' },
+                { label: 'Payment',      value: PAYMENT_LABELS[editTarget.payment_method ?? 'cash'] ?? editTarget.payment_method ?? 'Cash' },
+              ].map(({ label, value, valueColor }) => (
+                <div key={label}>
+                  <p style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 2px' }}>
+                    {label}
+                  </p>
+                  <p style={{ fontSize: 12, fontWeight: 500, color: valueColor ?? '#111827', margin: 0, fontFamily: valueColor ? 'monospace' : 'inherit' }}>
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* Editable fields */}
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
+                Description
+              </label>
+              <textarea
+                value={editFields.description}
+                onChange={e => setEditFields(prev => ({ ...prev, description: e.target.value }))}
+                rows={3}
+                maxLength={500}
+                style={{
+                  width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 6,
+                  border: '1px solid rgba(0,0,0,0.15)', color: '#111827',
+                  resize: 'vertical', outline: 'none', fontFamily: 'inherit',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
+                Reference No
+              </label>
+              <input
+                type="text"
+                value={editFields.reference_no}
+                onChange={e => setEditFields(prev => ({ ...prev, reference_no: e.target.value }))}
+                maxLength={100}
+                style={{
+                  width: '100%', height: 32, padding: '0 10px', fontSize: 12, borderRadius: 6,
+                  border: '1px solid rgba(0,0,0,0.15)', color: '#111827',
+                  outline: 'none', boxSizing: 'border-box',
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
+                Category
+              </label>
+              <select
+                value={editFields.category}
+                onChange={e => setEditFields(prev => ({ ...prev, category: e.target.value }))}
+                style={{
+                  width: '100%', height: 32, padding: '0 8px', fontSize: 12, borderRadius: 6,
+                  border: '1px solid rgba(0,0,0,0.15)', color: '#111827',
+                  background: '#fff', outline: 'none', boxSizing: 'border-box',
+                }}
+              >
+                <option value="">— Select category —</option>
+                {Object.entries(EXPENSE_ACCOUNT_LABELS).map(([code, name]) => (
+                  <option key={code} value={name}>{code} — {name}</option>
+                ))}
+              </select>
+            </div>
+
+            <p style={{ fontSize: 11, color: '#9ca3af', margin: 0, lineHeight: 1.5 }}>
+              To correct amount or account, reverse this expense in Journal Entries and record a new one.
+            </p>
+
+            {editErr && (
+              <p style={{ fontSize: 11, color: '#A32D2D', background: '#FCEBEB', borderRadius: 6, padding: '6px 10px', margin: 0 }}>
+                {editErr}
+              </p>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
+              <Button variant="secondary" size="sm" onClick={closeEdit} disabled={isSaving}>
+                Cancel
+              </Button>
+              <Button size="sm" loading={isSaving} onClick={handleSave}>
+                Save Changes
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Void confirm dialog */}
+      <ConfirmDialog
+        open={!!voidTarget}
+        onClose={() => setVoidTarget(null)}
+        onConfirm={handleVoidConfirm}
+        title="Void this expense?"
+        message={
+          voidTarget
+            ? `This will reverse the journal entry for "${voidTarget.description}" — ${fmtPKR(Number(voidTarget.amount))}. The expense will remain visible as voided. This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Void Expense"
+        confirmVariant="danger"
+        loading={isVoiding}
+      />
     </div>
   )
 }

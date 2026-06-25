@@ -34,11 +34,13 @@ const AddBatchSchema = z.object({
   batch_no:       z.string().min(1, 'Batch number is required').max(50),
   expiry_date:    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
   quantity:       z.number().int().positive('Quantity must be a positive integer'),
-  purchase_price: z.number().positive('Purchase price must be positive'),
-  sale_price:     z.number().positive('Sale price must be positive'),
+  // Optional — required only for NEW batches; validated server-side based on mode
+  purchase_price: z.number().positive('Purchase price must be positive').optional(),
+  sale_price:     z.number().positive('Sale price must be positive').optional(),
   mrp:            z.number().positive('MRP must be positive').optional(),
   supplier_id:    z.string().uuid().optional(),
   notes:          z.string().optional(),
+  is_new_batch:   z.boolean().default(false),
 })
 
 const AdjustStockSchema = z.object({
@@ -66,6 +68,18 @@ const WriteOffSchema = z.object({
 // ─── Input types (exported for component use) ─────────────────────────────────
 
 export type AddBatchInput = z.input<typeof AddBatchSchema>
+
+export interface BatchForDropdown {
+  id: string
+  batch_no: string
+  expiry_date: string
+  quantity: number
+  purchase_price: number | null
+  sale_price: number | null
+  mrp: number | null
+  supplier_id: string | null
+  supplier_name: string | null
+}
 
 export interface StockSummary {
   medicine_id:    string
@@ -98,63 +112,91 @@ export async function addStockBatch(
     .maybeSingle()
   if (!medicine) return { error: 'Medicine not found or inactive' }
 
-  // Check batch_no uniqueness per medicine
-  const { data: dupBatch } = await supabase
+  // Check if this batch already exists for this medicine
+  const { data: existingBatch } = await supabase
     .from('stock_batches')
-    .select('id')
+    .select('id, quantity')
     .eq('medicine_id', data.medicine_id)
     .eq('batch_no', data.batch_no)
     .eq('is_deleted', false)
     .maybeSingle()
-  if (dupBatch) return { error: `Batch number "${data.batch_no}" already exists for this medicine` }
 
-  // Resolve MRP: use provided or fall back to medicine master MRP
-  const batchMrp = data.mrp ?? medicine.mrp
+  let batchId: string
 
-  // App-layer check: sale_price > mrp
-  if (data.sale_price > batchMrp) {
-    return { error: `Sale price (${data.sale_price}) cannot exceed MRP (${batchMrp})` }
-  }
+  if (existingBatch) {
+    // Increment quantity on the existing batch — pricing fields are ignored
+    const newQty = existingBatch.quantity + data.quantity
+    const { error: updateError } = await supabase
+      .from('stock_batches')
+      .update({ quantity: newQty, updated_by: user.id })
+      .eq('id', existingBatch.id)
 
-  const { data: row, error: insertError } = await supabase
-    .from('stock_batches')
-    .insert({
-      medicine_id:    data.medicine_id,
-      batch_no:       data.batch_no,
-      expiry_date:    data.expiry_date,
-      quantity:       data.quantity,
-      purchase_price: data.purchase_price,
-      sale_price:     data.sale_price,
-      mrp:            batchMrp,
-      supplier_id:    data.supplier_id ?? null,
-      notes:          data.notes ?? null,
-      created_by:     user.id,
+    if (updateError) return { error: updateError.message }
+    batchId = existingBatch.id
+
+    await logAction({
+      supabase,
+      userId:    user.id,
+      userRole:  role,
+      action:    ACTION_TYPES.ADD_STOCK_BATCH,
+      tableName: 'stock_batches',
+      recordId:  batchId,
+      oldValue:  { quantity: existingBatch.quantity },
+      newValue:  { quantity: newQty, added: data.quantity, batch_no: data.batch_no },
     })
-    .select('id')
-    .single()
+  } else {
+    // New batch — require pricing fields
+    if (!data.purchase_price || !data.sale_price) {
+      return { error: 'Purchase price and sale price are required for a new batch' }
+    }
 
-  if (insertError || !row) return { error: insertError?.message ?? 'Failed to add stock batch' }
+    const batchMrp = data.mrp ?? medicine.mrp
 
-  await logAction({
-    supabase,
-    userId:    user.id,
-    userRole:  role,
-    action:    ACTION_TYPES.ADD_STOCK_BATCH,
-    tableName: 'stock_batches',
-    recordId:  row.id,
-    newValue:  {
-      medicine_id:    data.medicine_id,
-      batch_no:       data.batch_no,
-      quantity:       data.quantity,
-      expiry_date:    data.expiry_date,
-      mrp:            batchMrp,
-    },
-  })
+    if (data.sale_price > batchMrp) {
+      return { error: `Sale price (${data.sale_price}) cannot exceed MRP (${batchMrp})` }
+    }
+
+    const { data: row, error: insertError } = await supabase
+      .from('stock_batches')
+      .insert({
+        medicine_id:    data.medicine_id,
+        batch_no:       data.batch_no,
+        expiry_date:    data.expiry_date,
+        quantity:       data.quantity,
+        purchase_price: data.purchase_price,
+        sale_price:     data.sale_price,
+        mrp:            batchMrp,
+        supplier_id:    data.supplier_id ?? null,
+        notes:          data.notes ?? null,
+        created_by:     user.id,
+      })
+      .select('id')
+      .single()
+
+    if (insertError || !row) return { error: insertError?.message ?? 'Failed to add stock batch' }
+    batchId = row.id
+
+    await logAction({
+      supabase,
+      userId:    user.id,
+      userRole:  role,
+      action:    ACTION_TYPES.ADD_STOCK_BATCH,
+      tableName: 'stock_batches',
+      recordId:  batchId,
+      newValue:  {
+        medicine_id:    data.medicine_id,
+        batch_no:       data.batch_no,
+        quantity:       data.quantity,
+        expiry_date:    data.expiry_date,
+        mrp:            batchMrp,
+      },
+    })
+  }
 
   revalidatePath('/superadmin/medicines')
   revalidatePath('/admin/inventory')
   revalidatePath('/pharmacist/inventory')
-  return { data: { id: row.id }, error: null }
+  return { data: { id: batchId }, error: null }
 }
 
 // ─── 2. adjustStock ───────────────────────────────────────────────────────────
@@ -416,4 +458,77 @@ export async function getAlertSummary(): Promise<{ data?: AlertSummary; error: s
     data: { lowStockMedicines, expiringBatches, expiryAlertDays },
     error: null,
   }
+}
+
+// ─── 6. getNextBatchNumber ────────────────────────────────────────────────────
+
+export async function getNextBatchNumber(): Promise<{ data: string; error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role) return { data: '', error: 'Not authenticated' }
+  if (!canWriteStock(role)) return { data: '', error: 'Insufficient permissions' }
+
+  const year = new Date().getFullYear()
+  const prefix = `BTH-${year}-`
+
+  // Fetch all batch numbers matching this year's prefix (global, not per-medicine)
+  const { data, error } = await supabase
+    .from('stock_batches')
+    .select('batch_no')
+    .like('batch_no', `${prefix}%`)
+    .eq('is_deleted', false)
+
+  if (error) return { data: '', error: error.message }
+
+  // Find the highest numeric suffix — safe against gaps from soft-deletes
+  let max = 0
+  for (const row of (data ?? []) as { batch_no: string }[]) {
+    const suffix = row.batch_no.slice(prefix.length)
+    const num = parseInt(suffix, 10)
+    if (!isNaN(num) && num > max) max = num
+  }
+
+  // 4-digit padding: BTH-2026-0001 through BTH-2026-9999
+  return { data: `${prefix}${String(max + 1).padStart(4, '0')}`, error: null }
+}
+
+// ─── 7. getBatchesForMedicine ─────────────────────────────────────────────────
+
+export async function getBatchesForMedicine(
+  medicineId: string,
+): Promise<{ data: BatchForDropdown[]; error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role) return { data: [], error: 'Not authenticated' }
+  if (!canWriteStock(role)) return { data: [], error: 'Insufficient permissions' }
+
+  const { data, error } = await supabase
+    .from('stock_batches')
+    .select(`
+      id, batch_no, expiry_date, quantity,
+      purchase_price, sale_price, mrp, supplier_id,
+      suppliers:supplier_id ( name )
+    `)
+    .eq('medicine_id', medicineId)
+    .eq('is_deleted', false)
+    .order('expiry_date', { ascending: true })
+
+  if (error) return { data: [], error: error.message }
+
+  // Supabase may return the FK join as an object or single-element array depending on version
+  const rows = (data ?? []).map((b: Record<string, unknown>) => {
+    const sup = b.suppliers as { name: string } | { name: string }[] | null
+    const supplierName = Array.isArray(sup) ? (sup[0]?.name ?? null) : (sup?.name ?? null)
+    return {
+      id:             b.id             as string,
+      batch_no:       b.batch_no       as string,
+      expiry_date:    b.expiry_date    as string,
+      quantity:       b.quantity       as number,
+      purchase_price: b.purchase_price as number | null,
+      sale_price:     b.sale_price     as number | null,
+      mrp:            b.mrp            as number | null,
+      supplier_id:    b.supplier_id    as string | null,
+      supplier_name:  supplierName,
+    }
+  })
+
+  return { data: rows, error: null }
 }

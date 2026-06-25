@@ -4,6 +4,7 @@ import React from "react";
 import { AlertTriangle } from "lucide-react";
 import { Modal } from "./Modal";
 import { Button } from "./Button";
+import type { ButtonVariant } from "./Button";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -12,6 +13,7 @@ interface ConfirmDialogProps {
   title?: string;
   message: string;
   confirmLabel?: string;
+  confirmVariant?: ButtonVariant;
   loading?: boolean;
 }
 
@@ -22,6 +24,7 @@ export function ConfirmDialog({
   title = "Are you sure?",
   message,
   confirmLabel = "Delete",
+  confirmVariant = "danger",
   loading = false,
 }: ConfirmDialogProps) {
   return (
@@ -36,7 +39,7 @@ export function ConfirmDialog({
             Cancel
           </Button>
           <Button
-            variant="danger"
+            variant={confirmVariant}
             className="flex-1"
             onClick={onConfirm}
             loading={loading}

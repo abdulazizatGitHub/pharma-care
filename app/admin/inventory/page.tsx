@@ -4,6 +4,7 @@ import { resolvePermissions, hasPermission } from '@/lib/permissions'
 import { MedicinesPage } from '@/components/medicines/MedicinesPage'
 import type { UserRole, Permission } from '@/lib/permissions'
 import type { MedicineRow, MedicineCategory, MedicineSubcategory, Medicine, Supplier } from '@/lib/db-types'
+import type { GenericNameOption } from '@/components/medicines/GenericNameCombobox'
 
 export default async function AdminInventoryPage() {
   const supabase = await createClient()
@@ -31,12 +32,14 @@ export default async function AdminInventoryPage() {
     { data: subcategories },
     { data: stockSummary },
     { data: suppliers },
+    { data: genericNamesData },
   ] = await Promise.all([
     supabase.from('medicines').select('*').eq('is_deleted', false).order('name'),
     supabase.from('medicine_categories').select('id, name, slug, is_deleted, created_at').eq('is_deleted', false).order('name'),
     supabase.from('medicine_subcategories').select('id, category_id, name, slug, is_deleted, created_at').eq('is_deleted', false).order('name'),
     supabase.rpc('get_stock_summary'),
     supabase.from('suppliers').select('*').eq('is_deleted', false).eq('is_active', true).order('name'),
+    supabase.from('generic_names').select('id, name').eq('is_deleted', false).eq('is_active', true).order('name'),
   ])
 
   const stockMap = new Map<string, { total_quantity: number; nearest_expiry: string | null }>(
@@ -57,6 +60,7 @@ export default async function AdminInventoryPage() {
       medicines={medicineRows}
       categories={(categories ?? []) as MedicineCategory[]}
       subcategories={(subcategories ?? []) as MedicineSubcategory[]}
+      genericNames={(genericNamesData ?? []) as GenericNameOption[]}
       suppliers={(suppliers ?? []) as Supplier[]}
     />
   )

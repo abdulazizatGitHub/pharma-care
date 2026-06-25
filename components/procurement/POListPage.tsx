@@ -148,6 +148,7 @@ export function POListPage({ pos, suppliers, basePath }: POListPageProps) {
           suppliers={supplierDropdown}
           basePath={basePath}
           canWrite={canWrite}
+          isSuperAdmin={role === 'superadmin'}
         />
       </div>
     </div>

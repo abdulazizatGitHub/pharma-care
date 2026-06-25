@@ -7,6 +7,8 @@ import { Input, Select, Textarea } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { PAGE, TEXT } from '@/lib/design-tokens'
 import { createMedicine, updateMedicine } from '@/app/actions/medicines'
+import { GenericNameCombobox } from './GenericNameCombobox'
+import type { GenericNameOption } from './GenericNameCombobox'
 import type { MedicineCategory, MedicineSubcategory, MedicineRow } from '@/lib/db-types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -15,6 +17,7 @@ interface MedicineDrawerProps {
   medicine?:     MedicineRow | null
   categories:    MedicineCategory[]
   subcategories: MedicineSubcategory[]
+  genericNames:  GenericNameOption[]
   onClose:       () => void
 }
 
@@ -22,14 +25,14 @@ const UNITS = ['strip', 'bottle', 'vial', 'sachet', 'tube', 'injection', 'syrup'
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function MedicineDrawer({ medicine, categories, subcategories, onClose }: MedicineDrawerProps) {
+export function MedicineDrawer({ medicine, categories, subcategories, genericNames, onClose }: MedicineDrawerProps) {
   const router  = useRouter()
   const isEdit  = !!medicine
 
   // Form state — initialised from medicine prop (edit) or defaults (add)
   const [name,          setName]          = useState(medicine?.name ?? '')
   const [code,          setCode]          = useState(medicine?.code ?? '')
-  const [genericName,   setGenericName]   = useState(medicine?.generic_name ?? '')
+  const [genericNameId, setGenericNameId] = useState(medicine?.generic_name_id ?? '')
   const [manufacturer,  setManufacturer]  = useState(medicine?.manufacturer ?? '')
   const [drapRegNo,     setDrapRegNo]     = useState(medicine?.drap_reg_no ?? '')
   const [barcode,       setBarcode]       = useState(medicine?.barcode ?? '')
@@ -46,6 +49,13 @@ export function MedicineDrawer({ medicine, categories, subcategories, onClose }:
 
   const [isPending, startTransition] = useTransition()
 
+  // Merge in any newly-created names so the combobox shows them immediately
+  const [localNames, setLocalNames] = useState<GenericNameOption[]>([])
+  const allGenericNames = useMemo(() => {
+    const existing = new Set(genericNames.map(n => n.id))
+    return [...genericNames, ...localNames.filter(n => !existing.has(n.id))]
+  }, [genericNames, localNames])
+
   const isOpen = true  // drawer is mounted only when open; key prop in parent forces remount
 
   // Subcategories filtered by selected category
@@ -54,51 +64,59 @@ export function MedicineDrawer({ medicine, categories, subcategories, onClose }:
     [subcategories, categoryId],
   )
 
+  function handleGenericNameChange(id: string, name: string) {
+    setGenericNameId(id)
+    // Track newly-added names so they're visible without a full page refresh
+    if (id && !genericNames.find(n => n.id === id)) {
+      setLocalNames(prev => [...prev.filter(n => n.id !== id), { id, name }])
+    }
+  }
+
   function handleSave() {
     setError(null)
-    const mrpNum        = parseFloat(mrp)
-    const reorderNum    = parseInt(reorderLevel, 10)
+    const mrpNum     = parseFloat(mrp)
+    const reorderNum = parseInt(reorderLevel, 10)
 
-    if (!name.trim())        { setError('Medicine name is required'); return }
+    if (!name.trim())         { setError('Medicine name is required'); return }
     if (!manufacturer.trim()) { setError('Manufacturer is required'); return }
     if (isNaN(mrpNum) || mrpNum <= 0) { setError('MRP must be a positive number'); return }
 
     startTransition(async () => {
       if (isEdit) {
         const result = await updateMedicine(medicine.id, {
-          name:           name.trim(),
-          generic_name:   genericName.trim() || undefined,
-          manufacturer:   manufacturer.trim(),
-          drap_reg_no:    drapRegNo.trim() || undefined,
-          category_id:    categoryId || null,
-          subcategory_id: subcategoryId || null,
+          name:            name.trim(),
+          generic_name_id: genericNameId || null,
+          manufacturer:    manufacturer.trim(),
+          drap_reg_no:     drapRegNo.trim() || undefined,
+          category_id:     categoryId || null,
+          subcategory_id:  subcategoryId || null,
           schedule,
-          pack_size:      packSize.trim() || undefined,
+          pack_size:       packSize.trim() || undefined,
           unit,
-          mrp:            mrpNum,
-          reorder_level:  isNaN(reorderNum) ? 10 : reorderNum,
-          barcode:        barcode.trim() || undefined,
-          instructions:   instructions.trim() || undefined,
-          precautions:    precautions.trim() || undefined,
+          mrp:             mrpNum,
+          reorder_level:   isNaN(reorderNum) ? 10 : reorderNum,
+          barcode:         barcode.trim() || undefined,
+          instructions:    instructions.trim() || undefined,
+          precautions:     precautions.trim() || undefined,
         })
         if (result.error) { setError(result.error); return }
       } else {
         const result = await createMedicine({
-          name:           name.trim(),
-          code:           code.trim() || undefined,
-          generic_name:   genericName.trim() || undefined,
-          manufacturer:   manufacturer.trim(),
-          drap_reg_no:    drapRegNo.trim() || undefined,
-          category_id:    categoryId || undefined,
-          subcategory_id: subcategoryId || undefined,
+          name:            name.trim(),
+          code:            code.trim() || undefined,
+          generic_name_id: genericNameId || undefined,
+          manufacturer:    manufacturer.trim(),
+          drap_reg_no:     drapRegNo.trim() || undefined,
+          category_id:     categoryId || undefined,
+          subcategory_id:  subcategoryId || undefined,
           schedule,
-          pack_size:      packSize.trim() || undefined,
+          pack_size:       packSize.trim() || undefined,
           unit,
-          mrp:            mrpNum,
-          reorder_level:  isNaN(reorderNum) ? 10 : reorderNum,
-          barcode:        barcode.trim() || undefined,
-          instructions:   instructions.trim() || undefined,
-          precautions:    precautions.trim() || undefined,
+          mrp:             mrpNum,
+          reorder_level:   isNaN(reorderNum) ? 10 : reorderNum,
+          barcode:         barcode.trim() || undefined,
+          instructions:    instructions.trim() || undefined,
+          precautions:     precautions.trim() || undefined,
         })
         if (result.error) { setError(result.error); return }
       }
@@ -179,12 +197,12 @@ export function MedicineDrawer({ medicine, categories, subcategories, onClose }:
                 />
               )}
 
-              <Input
-                label="Generic / salt name"
-                placeholder="e.g. Paracetamol"
-                value={genericName}
-                onChange={e => setGenericName(e.target.value)}
+              <GenericNameCombobox
+                value={genericNameId}
+                onChange={handleGenericNameChange}
+                options={allGenericNames}
               />
+
               <div className="grid grid-cols-2 gap-3">
                 <Input
                   label="DRAP reg. no."

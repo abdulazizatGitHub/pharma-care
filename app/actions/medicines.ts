@@ -51,38 +51,40 @@ async function checkInventoryManage(
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
 const CreateMedicineSchema = z.object({
-  name:           z.string().min(1, 'Medicine name is required').max(200),
-  code:           z.string().max(20).optional(),
-  generic_name:   z.string().max(200).optional(),
-  manufacturer:   z.string().min(1, 'Manufacturer is required').max(200),
-  drap_reg_no:    z.string().max(50).optional(),
-  category_id:    z.string().uuid().optional(),
-  subcategory_id: z.string().uuid().optional(),
-  schedule:       z.enum(['OTC', 'prescription', 'controlled']).default('OTC'),
-  pack_size:      z.string().max(100).optional(),
-  unit:           z.string().max(50).default('strip'),
-  mrp:            z.number().positive('MRP must be positive'),
-  reorder_level:  z.number().int().min(0).default(10),
-  barcode:        z.string().max(100).optional(),
-  instructions:   z.string().optional(),
-  precautions:    z.string().optional(),
+  name:             z.string().min(1, 'Medicine name is required').max(200),
+  code:             z.string().max(20).optional(),
+  generic_name:     z.string().max(200).optional(),
+  generic_name_id:  z.string().uuid().optional(),
+  manufacturer:     z.string().min(1, 'Manufacturer is required').max(200),
+  drap_reg_no:      z.string().max(50).optional(),
+  category_id:      z.string().uuid().optional(),
+  subcategory_id:   z.string().uuid().optional(),
+  schedule:         z.enum(['OTC', 'prescription', 'controlled']).default('OTC'),
+  pack_size:        z.string().max(100).optional(),
+  unit:             z.string().max(50).default('strip'),
+  mrp:              z.number().positive('MRP must be positive'),
+  reorder_level:    z.number().int().min(0).default(10),
+  barcode:          z.string().max(100).optional(),
+  instructions:     z.string().optional(),
+  precautions:      z.string().optional(),
 })
 
 const UpdateMedicineSchema = z.object({
-  name:           z.string().min(1).max(200).optional(),
-  generic_name:   z.string().max(200).optional(),
-  manufacturer:   z.string().min(1).max(200).optional(),
-  drap_reg_no:    z.string().max(50).optional(),
-  category_id:    z.string().uuid().nullable().optional(),
-  subcategory_id: z.string().uuid().nullable().optional(),
-  schedule:       z.enum(['OTC', 'prescription', 'controlled']).optional(),
-  pack_size:      z.string().max(100).optional(),
-  unit:           z.string().max(50).optional(),
-  mrp:            z.number().positive().optional(),
-  reorder_level:  z.number().int().min(0).optional(),
-  barcode:        z.string().max(100).optional(),
-  instructions:   z.string().optional(),
-  precautions:    z.string().optional(),
+  name:             z.string().min(1).max(200).optional(),
+  generic_name:     z.string().max(200).optional(),
+  generic_name_id:  z.string().uuid().nullable().optional(),
+  manufacturer:     z.string().min(1).max(200).optional(),
+  drap_reg_no:      z.string().max(50).optional(),
+  category_id:      z.string().uuid().nullable().optional(),
+  subcategory_id:   z.string().uuid().nullable().optional(),
+  schedule:         z.enum(['OTC', 'prescription', 'controlled']).optional(),
+  pack_size:        z.string().max(100).optional(),
+  unit:             z.string().max(50).optional(),
+  mrp:              z.number().positive().optional(),
+  reorder_level:    z.number().int().min(0).optional(),
+  barcode:          z.string().max(100).optional(),
+  instructions:     z.string().optional(),
+  precautions:      z.string().optional(),
 })
 
 // ─── Input types (exported for component use) ─────────────────────────────────
@@ -146,25 +148,37 @@ export async function createMedicine(
     code = generated as string
   }
 
+  // Resolve generic name text from FK when id is provided
+  let resolvedGenericName = data.generic_name ?? null
+  if (data.generic_name_id) {
+    const { data: gn } = await supabase
+      .from('generic_names')
+      .select('name')
+      .eq('id', data.generic_name_id)
+      .single()
+    if (gn) resolvedGenericName = gn.name
+  }
+
   const { data: row, error: insertError } = await supabase
     .from('medicines')
     .insert({
-      name:           data.name,
+      name:            data.name,
       code,
-      generic_name:   data.generic_name ?? null,
-      manufacturer:   data.manufacturer,
-      drap_reg_no:    data.drap_reg_no ?? null,
-      category_id:    data.category_id ?? null,
-      subcategory_id: data.subcategory_id ?? null,
-      schedule:       data.schedule,
-      pack_size:      data.pack_size ?? null,
-      unit:           data.unit,
-      mrp:            data.mrp,
-      reorder_level:  data.reorder_level,
-      barcode:        data.barcode ?? null,
-      instructions:   data.instructions ?? null,
-      precautions:    data.precautions ?? null,
-      created_by:     user.id,
+      generic_name:    resolvedGenericName,
+      generic_name_id: data.generic_name_id ?? null,
+      manufacturer:    data.manufacturer,
+      drap_reg_no:     data.drap_reg_no ?? null,
+      category_id:     data.category_id ?? null,
+      subcategory_id:  data.subcategory_id ?? null,
+      schedule:        data.schedule,
+      pack_size:       data.pack_size ?? null,
+      unit:            data.unit,
+      mrp:             data.mrp,
+      reorder_level:   data.reorder_level,
+      barcode:         data.barcode ?? null,
+      instructions:    data.instructions ?? null,
+      precautions:     data.precautions ?? null,
+      created_by:      user.id,
     })
     .select('id')
     .single()
@@ -211,9 +225,24 @@ export async function updateMedicine(
     .maybeSingle()
   if (!existing) return { error: 'Medicine not found' }
 
+  // Resolve generic name text from FK when id is provided
+  const updatePayload: Record<string, unknown> = { ...parsed.data }
+  if (parsed.data.generic_name_id !== undefined) {
+    if (parsed.data.generic_name_id) {
+      const { data: gn } = await supabase
+        .from('generic_names')
+        .select('name')
+        .eq('id', parsed.data.generic_name_id)
+        .single()
+      if (gn) updatePayload.generic_name = gn.name
+    } else {
+      updatePayload.generic_name = null
+    }
+  }
+
   const { error: updateError } = await supabase
     .from('medicines')
-    .update({ ...parsed.data, updated_by: user.id })
+    .update({ ...updatePayload, updated_by: user.id })
     .eq('id', medicineId)
 
   if (updateError) return { error: updateError.message }
@@ -825,6 +854,155 @@ export async function deleteSubcategory(
     recordId:  subcategoryId,
     newValue:  { is_deleted: true },
   })
+
+  revalidatePath('/superadmin/medicines')
+  revalidatePath('/admin/inventory')
+  revalidatePath('/pharmacist/inventory')
+  return { error: null }
+}
+
+// ─── Generic Names ────────────────────────────────────────────────────────────
+
+export async function getGenericNames(): Promise<{ data: { id: string; name: string }[]; error: string | null }> {
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from('generic_names')
+    .select('id, name')
+    .eq('is_deleted', false)
+    .eq('is_active', true)
+    .order('name')
+  if (error) return { data: [], error: error.message }
+  return { data: data ?? [], error: null }
+}
+
+export async function createGenericName(
+  name: string,
+): Promise<{ data?: { id: string; name: string }; error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role) return { error: 'Not authenticated' }
+  if (role !== 'superadmin' && role !== 'admin') return { error: 'Insufficient permissions' }
+
+  const trimmed = name.trim()
+  if (!trimmed) return { error: 'Name is required' }
+  if (trimmed.length > 200) return { error: 'Name too long' }
+
+  const { data: row, error: insertError } = await supabase
+    .from('generic_names')
+    .insert({ name: trimmed, created_by: user.id })
+    .select('id, name')
+    .single()
+
+  if (insertError) {
+    if (insertError.code === '23505') return { error: 'This generic name already exists' }
+    return { error: insertError.message }
+  }
+
+  revalidatePath('/superadmin/medicines')
+  revalidatePath('/admin/inventory')
+  revalidatePath('/pharmacist/inventory')
+  return { data: row, error: null }
+}
+
+export async function bulkCreateGenericNames(
+  names: string[],
+): Promise<{ added: number; skipped: number; error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role) return { added: 0, skipped: 0, error: 'Not authenticated' }
+  if (role !== 'superadmin' && role !== 'admin') return { added: 0, skipped: 0, error: 'Insufficient permissions' }
+
+  // Deduplicate case-insensitively, filter blanks
+  const seen = new Set<string>()
+  const unique = names
+    .map(n => n.trim())
+    .filter(n => n.length > 0 && n.length <= 200)
+    .filter(n => { const key = n.toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true })
+
+  if (unique.length === 0) return { added: 0, skipped: 0, error: null }
+
+  const rows = unique.map(name => ({ name, created_by: user.id }))
+
+  const { data, error: insertError } = await supabase
+    .from('generic_names')
+    .upsert(rows, { onConflict: 'name', ignoreDuplicates: true })
+    .select('id')
+
+  if (insertError) return { added: 0, skipped: 0, error: insertError.message }
+
+  const added   = data?.length ?? 0
+  const skipped = unique.length - added
+
+  revalidatePath('/superadmin/medicines')
+  revalidatePath('/admin/inventory')
+  revalidatePath('/pharmacist/inventory')
+  return { added, skipped, error: null }
+}
+
+export async function updateGenericName(
+  id: string,
+  name: string,
+): Promise<{ error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role) return { error: 'Not authenticated' }
+  if (role !== 'superadmin' && role !== 'admin') return { error: 'Insufficient permissions' }
+
+  const trimmed = name.trim()
+  if (!trimmed) return { error: 'Name is required' }
+  if (trimmed.length > 200) return { error: 'Name too long' }
+
+  // Check for duplicate name (excluding self)
+  const { data: existing } = await supabase
+    .from('generic_names')
+    .select('id')
+    .eq('name', trimmed)
+    .eq('is_deleted', false)
+    .neq('id', id)
+    .maybeSingle()
+  if (existing) return { error: `"${trimmed}" already exists` }
+
+  const { error: updateError } = await supabase
+    .from('generic_names')
+    .update({ name: trimmed })
+    .eq('id', id)
+
+  if (updateError) return { error: updateError.message }
+
+  // Keep the legacy text column in sync on affected medicines
+  await supabase
+    .from('medicines')
+    .update({ generic_name: trimmed })
+    .eq('generic_name_id', id)
+    .eq('is_deleted', false)
+
+  revalidatePath('/superadmin/medicines')
+  revalidatePath('/admin/inventory')
+  revalidatePath('/pharmacist/inventory')
+  return { error: null }
+}
+
+export async function deactivateGenericName(
+  id: string,
+): Promise<{ error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role) return { error: 'Not authenticated' }
+  if (role !== 'superadmin' && role !== 'admin') return { error: 'Insufficient permissions' }
+
+  // Guard: reject if any active medicines reference this name
+  const { count } = await supabase
+    .from('medicines')
+    .select('id', { count: 'exact', head: true })
+    .eq('generic_name_id', id)
+    .eq('is_deleted', false)
+
+  if (count && count > 0) {
+    return { error: `Cannot deactivate — ${count} medicine${count === 1 ? '' : 's'} use this generic name` }
+  }
+
+  const { error: updateError } = await supabase
+    .from('generic_names')
+    .update({ is_deleted: true })
+    .eq('id', id)
+
+  if (updateError) return { error: updateError.message }
 
   revalidatePath('/superadmin/medicines')
   revalidatePath('/admin/inventory')

@@ -45,11 +45,21 @@ export interface MedicineSubcategory {
   created_at: string
 }
 
+export interface GenericName {
+  id: string
+  name: string
+  is_active: boolean
+  is_deleted: boolean
+  created_at: string
+  created_by: string | null
+}
+
 export interface Medicine {
   id: string
   name: string
   code: string | null
   generic_name: string | null
+  generic_name_id: string | null
   manufacturer: string | null
   drap_reg_no: string | null
   category_id: string | null
@@ -118,8 +128,10 @@ export type POStatus =
   | 'draft'
   | 'pending_approval'
   | 'confirmed'
+  | 'partially_received'
   | 'received'
   | 'cancelled'
+  | 'closed_short'
 
 export interface PurchaseOrder {
   id:             string
@@ -299,7 +311,7 @@ export type JournalReferenceType =
   | 'sale' | 'sale_return' | 'purchase_order' | 'grn'
   | 'supplier_payment' | 'customer_payment'
   | 'borrowing_out' | 'borrowing_in'
-  | 'borrowing_payment' | 'expense'
+  | 'borrowing_payment' | 'expense' | 'expense_void'
   | 'manual' | 'opening_balance' | 'adjustment'
 
 export interface JournalEntry {
@@ -415,16 +427,21 @@ export interface ExchangeRate {
 // ─── Expenses (Phase 8) ───────────────────────────────────────────────────────
 
 export interface Expense {
-  id:               string
-  expense_date:     string         // DATE as YYYY-MM-DD
-  account_code:     string | null  // FK to accounts(code), 6xxx
-  amount:           number
-  description:      string
-  payment_method:   string | null  // 'cash' | 'bank_transfer' | 'cheque'
-  reference_no:     string | null
-  recorded_by:      string | null  // UUID → profiles
-  journal_entry_id: string | null  // UUID → journal_entries
-  category:         string         // legacy column from migration 001
-  created_at:       string
-  is_deleted:       boolean
+  id:                    string
+  expense_date:          string         // DATE as YYYY-MM-DD
+  account_code:          string | null  // FK to accounts(code), 6xxx
+  amount:                number
+  description:           string
+  payment_method:        string | null  // 'cash' | 'bank_transfer' | 'cheque'
+  reference_no:          string | null
+  recorded_by:           string | null  // UUID → profiles
+  journal_entry_id:      string | null  // UUID → journal_entries
+  category:              string         // legacy column from migration 001
+  created_at:            string
+  is_deleted:            boolean
+  // void fields (migration 026)
+  is_voided:             boolean
+  voided_at:             string | null
+  voided_by:             string | null
+  void_journal_entry_id: string | null
 }

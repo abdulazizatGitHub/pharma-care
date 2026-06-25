@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { ExpenseTable }       from '@/components/expenses/ExpenseTable'
 import { ExpenseSummaryCard } from '@/components/expenses/ExpenseSummaryCard'
 import { RecordExpenseModal } from '@/components/expenses/RecordExpenseModal'
+import type { ExpenseInitialValues } from '@/components/expenses/RecordExpenseModal'
 import { useDashboardUser }   from '@/lib/dashboard-context'
 import { hasPermission }      from '@/lib/permissions'
 import type { ExpenseRow, ExpenseSummary } from '@/app/actions/expenses'
@@ -21,7 +22,25 @@ export function ExpensesPage({ expenses, summary, monthLabel }: Props) {
   const isSuperadmin = role === 'superadmin'
   const canWrite     = isSuperadmin || hasPermission(permissions, 'expenses')
 
-  const [modalOpen, setModalOpen] = useState(false)
+  const [modalOpen,    setModalOpen]    = useState(false)
+  const [prefillValues, setPrefillValues] = useState<ExpenseInitialValues | undefined>(undefined)
+
+  function handleVoidAndReRecord(expense: ExpenseRow) {
+    setPrefillValues({
+      expense_date:   expense.expense_date,
+      account_code:   expense.account_code ?? undefined,
+      amount:         String(expense.amount),
+      description:    expense.description,
+      payment_method: expense.payment_method ?? undefined,
+      reference_no:   expense.reference_no   ?? undefined,
+    })
+    setModalOpen(true)
+  }
+
+  function handleModalClose() {
+    setModalOpen(false)
+    setPrefillValues(undefined)
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '24px 24px 40px', maxWidth: 1100, margin: '0 auto' }}>
@@ -45,12 +64,17 @@ export function ExpensesPage({ expenses, summary, monthLabel }: Props) {
       <ExpenseSummaryCard summary={summary} monthLabel={monthLabel} />
 
       {/* Expense list */}
-      <ExpenseTable expenses={expenses} isSuperadmin={isSuperadmin} />
+      <ExpenseTable
+        expenses={expenses}
+        isSuperadmin={isSuperadmin}
+        onVoidAndReRecord={handleVoidAndReRecord}
+      />
 
       {/* Record modal */}
       <RecordExpenseModal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={handleModalClose}
+        initialValues={prefillValues}
       />
     </div>
   )
