@@ -45,6 +45,24 @@ The two affected components when this is built:
 - Phase 10: Audit Trail UI — read-only audit log viewer at /superadmin/audit; getAuditLogs (paginated, 5 filters: user/action/table/date range), getAuditStats (total/by-type/by-user/by-day), getAuditFilterOptions; AuditPage (3 stat cards, filter row, activity LineChart, paginated table), AuditLogRow (relative time, role badge, action badge coloured by category, expandable old/new value as key:value pairs)
 - Phase 11: Shift Management — migration 018 (column renames: opening_float→opening_cash, system_cash→expected_cash, discrepancy→cash_difference), openShift/closeShift/getCurrentShift/getShiftHistory/getShiftSummary server actions, ShiftStatusBanner (POS + pharmacist dashboard), OpenShiftModal, CloseShiftModal, ShiftHistoryTable, ShiftDetailPanel, PharmacistShiftsContent, AdminShiftsContent; routes: /pharmacist/shifts, /admin/shifts, /superadmin/shifts; POS Complete Sale disabled when no shift open
 - Phase 7F: Borrowing POS Integration — migration 022 (settlement columns on borrowing_pharmacies, sale_id/sale_item_id/is_pos_borrow on borrowing_transactions, is_borrowed/borrowed_from/borrow_cost on sale_items, is_borrowed on stock_batches); server actions: borrowToFulfill, completeBorrowingSale, lendToPharmacy, getDailyBorrowingReport, getSettlementDuePharmacies, processSettlement, updatePharmacySettlement; POS UI: OOS medicines shown with Borrow button, BorrowToFulfillModal, LendToPharmacyModal, borrowed CartItem display, CheckoutModal passes borrowedItems; DailyBorrowingReport printable component; CloseShiftModal borrowing summary; LedgerBorrowingDetailPage settlement settings + action cards; superadmin dashboard settlement-due alerts; LedgerBorrowingListPage daily report picker; pharmacist shifts page borrowing report button
+- Phase 9B: Reports Sidebar & Item Detail Report — collapsible Reports group in superadmin + admin sidebars (localStorage persistence, auto-expand on report routes, exact-match active highlighting for child routes); Report link on each medicine row in MedicineTable; migration 028 (4 DB functions: get_item_batch_detail, get_item_sales_detail, get_item_supplier_history, get_item_return_history); app/actions/item-report.ts (6 server actions, 6 typed interfaces); ItemDetailPage.tsx (6 sections: Overview KPIs, Stock & Batches, Sales History, Supplier History, Discount & Returns, Price & Margin; date range filter with Apply/This Month/YTD; 6 Recharts charts: daily units bar, revenue line, stock-by-batch Cell-coloured bar, supplier units bar, revenue vs discount stacked bar, purchase price history line; skeletons, pagination, error states); routes: /superadmin/reports/item-detail, /admin/reports/item-detail
+
+## Deferred: Reports sub-pages (future phases)
+- Phase 9C: Supplier Detail Report
+- Phase 9D: Batch Detail Report
+- Export (CSV/PDF) for Item Detail Report — deferred until report is stable
+
+## Known Conventions
+Test runner: Jest (not Vitest)
+  npx jest tests/route-access.test.ts      → 145/145
+  npx jest tests/rls-policies.test.ts      → 83/83
+  npx jest tests/functional-flows.test.ts  → all pass
+
+Sidebar collapsible groups:
+  localStorage key pattern: 'sidebar_[section]_expanded'
+  Active child check: exact pathname match (===), NOT startsWith —
+    startsWith causes parent-level routes (e.g. /admin/reports) to
+    falsely highlight when on a child route (e.g. /admin/reports/item-detail)
 
 ## Known RLS Gaps
 - purchase_order_items DELETE policy: role-only check.

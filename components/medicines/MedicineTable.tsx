@@ -1,11 +1,13 @@
 'use client'
 
 import React, { useState, useMemo } from 'react'
-import { Search, ChevronUp, ChevronDown } from 'lucide-react'
+import Link from 'next/link'
+import { Search, ChevronUp, ChevronDown, BarChart2 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Input'
 import { FONT, PAGE, TEXT } from '@/lib/design-tokens'
+import { useDashboardUser } from '@/lib/dashboard-context'
 import type { MedicineCategory, MedicineSubcategory, MedicineRow } from '@/lib/db-types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -48,6 +50,9 @@ export function MedicineTable({
   onReactivate,
   onViewStock,
 }: MedicineTableProps) {
+  const { role } = useDashboardUser()
+  const canReport = role === 'superadmin' || role === 'admin'
+
   const [search,        setSearch]        = useState('')
   const [catFilter,     setCatFilter]     = useState('')
   const [subCatFilter,  setSubCatFilter]  = useState('')
@@ -293,6 +298,16 @@ export function MedicineTable({
                     <Button variant="ghost" size="sm" onClick={() => onViewStock(m)}>
                       Stock
                     </Button>
+                    {canReport && (
+                      <Link
+                        href={`/${role}/reports/item-detail?medicine_id=${m.id}`}
+                        className="inline-flex items-center justify-center font-medium transition-all duration-150 whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0F6E56] focus-visible:ring-offset-2 h-7 px-3 text-[11px] rounded-md gap-1.5 text-[#111827] hover:bg-[#f3f4f6]"
+                        style={{ textDecoration: 'none' }}
+                      >
+                        <BarChart2 size={12} />
+                        Report
+                      </Link>
+                    )}
                     {canWrite && (
                       <>
                         <Button variant="secondary" size="sm" onClick={() => onEdit(m)}>

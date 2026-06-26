@@ -596,6 +596,54 @@ describe('Phase 9 — Reports routes', () => {
   })
 })
 
+// ─── PHASE 9B — ITEM DETAIL REPORT ROUTES ────────────────────────────────────
+// /superadmin/reports/item-detail: superadmin only (middleware prefix)
+// /admin/reports/item-detail:      admin + superadmin, guards reports_full permission
+// Pharmacist has no access to either.
+describe('Phase 9B — Item Detail Report routes', () => {
+
+  // Unauthenticated → 307 → /login
+  test.each(['/superadmin/reports/item-detail', '/admin/reports/item-detail'])(
+    'GET %s unauthenticated → 307 → /login',
+    async (path) => {
+      const res = await anonGet(path)
+      expectRedirectTo(res, '/login')
+    }
+  )
+
+  // Correct role → 200
+  test('GET /superadmin/reports/item-detail as superadmin → 200', async () => {
+    const res = await authGet('/superadmin/reports/item-detail', cookies.superadmin)
+    expect(res.status).toBe(200)
+  })
+
+  test('GET /admin/reports/item-detail as admin → 200', async () => {
+    const res = await authGet('/admin/reports/item-detail', cookies.admin)
+    expect(res.status).toBe(200)
+  })
+
+  test('GET /admin/reports/item-detail as superadmin → 200', async () => {
+    const res = await authGet('/admin/reports/item-detail', cookies.superadmin)
+    expect(res.status).toBe(200)
+  })
+
+  // Wrong role → 307 → /unauthorized
+  test('GET /superadmin/reports/item-detail as admin → 307 → /unauthorized', async () => {
+    const res = await authGet('/superadmin/reports/item-detail', cookies.admin)
+    expectRedirectTo(res, '/unauthorized')
+  })
+
+  test('GET /superadmin/reports/item-detail as pharmacist → 307 → /unauthorized', async () => {
+    const res = await authGet('/superadmin/reports/item-detail', cookies.pharmacist)
+    expectRedirectTo(res, '/unauthorized')
+  })
+
+  test('GET /admin/reports/item-detail as pharmacist → 307 → /unauthorized', async () => {
+    const res = await authGet('/admin/reports/item-detail', cookies.pharmacist)
+    expectRedirectTo(res, '/unauthorized')
+  })
+})
+
 // ─── PHASE 11 — SHIFT ROUTES ──────────────────────────────────────────────────
 // /pharmacist/shifts: pharmacist + superadmin (not admin)
 // /admin/shifts:      admin + superadmin (not pharmacist)
