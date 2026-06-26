@@ -509,6 +509,7 @@ export async function getBatchesForMedicine(
     `)
     .eq('medicine_id', medicineId)
     .eq('is_deleted', false)
+    .or('and(sale_price.not.is.null,mrp.not.is.null),is_borrowed.eq.true')
     .order('expiry_date', { ascending: true })
 
   if (error) return { data: [], error: error.message }

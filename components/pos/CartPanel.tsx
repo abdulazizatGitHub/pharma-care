@@ -1,13 +1,16 @@
 'use client'
 
 import React, { useState } from 'react'
-import { ShoppingCart, PauseCircle, CheckCircle, RotateCcw, ArrowRightLeft } from 'lucide-react'
+import { ShoppingCart, PauseCircle, CheckCircle, RotateCcw, ArrowRightLeft, FlaskConical } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { CartItemRow } from './CartItem'
 import { CartTotals } from './CartTotals'
+import { BatchPicker } from './BatchPicker'
 import { LendToPharmacyModal } from './LendToPharmacyModal'
+import { getBatchesForMedicine } from '@/app/actions/stock'
 import { useCart } from '@/lib/pos-context'
-import type { ReturnCredit } from '@/lib/pos-types'
+import type { BatchForDropdown } from '@/app/actions/stock'
+import type { ReturnCredit, CartItem as CartItemType } from '@/lib/pos-types'
 
 function KbdBadge({ label, light = false }: { label: string; light?: boolean }) {
   return (
@@ -39,12 +42,66 @@ interface Props {
   returnCredit?:     ReturnCredit | null
 }
 
-export function CartPanel({ maxDiscountPct, serviceFeeEnabled, shiftOpen, onHold, onCheckout, onReturns, returnCredit }: Props) {
-  const { items } = useCart()
-  const [lendModalOpen, setLendModalOpen] = useState(false)
+export function CartPanel({
+  maxDiscountPct,
+  serviceFeeEnabled,
+  shiftOpen,
+  onHold,
+  onCheckout,
+  onReturns,
+  returnCredit,
+}: Props) {
+  const { items, replaceItemBatch } = useCart()
+
+  const [lendModalOpen,      setLendModalOpen]      = useState(false)
+  const [batchPickerItem,    setBatchPickerItem]    = useState<CartItemType | null>(null)
+  const [batchPickerBatches, setBatchPickerBatches] = useState<BatchForDropdown[]>([])
+  const [batchPickerLoading, setBatchPickerLoading] = useState(false)
+  const [qtyWarning,         setQtyWarning]         = useState<string | null>(null)
+
+  async function handleChangeBatch(item: CartItemType) {
+    setBatchPickerLoading(true)
+    const { data } = await getBatchesForMedicine(item.medicineId)
+    setBatchPickerLoading(false)
+    if (!data || data.length === 0) return
+    setBatchPickerBatches(data)
+    setBatchPickerItem(item)
+  }
+
+  function handleBatchSelected(batch: BatchForDropdown) {
+    if (!batchPickerItem) return
+
+    const availableQty = batch.quantity
+    const wasCapped    = batchPickerItem.quantity > availableQty
+
+    replaceItemBatch(batchPickerItem.id, {
+      batchId:      batch.id,
+      batchNo:      batch.batch_no,
+      expiryDate:   batch.expiry_date,
+      mrp:          batch.mrp ?? batchPickerItem.mrp,
+      unitPrice:    batch.sale_price ?? batchPickerItem.unitPrice,
+      availableQty,
+    })
+
+    if (wasCapped) {
+      setQtyWarning(
+        `Qty reduced to ${availableQty} — only ${availableQty} available in batch ${batch.batch_no}`
+      )
+      setTimeout(() => setQtyWarning(null), 4000)
+    }
+
+    setBatchPickerItem(null)
+    setBatchPickerBatches([])
+  }
+
+  function closeBatchPicker() {
+    setBatchPickerItem(null)
+    setBatchPickerBatches([])
+  }
 
   return (
     <div className="flex flex-col h-full">
+
       {/* Return credit banner */}
       {returnCredit && (
         <div style={{
@@ -64,6 +121,18 @@ export function CartPanel({ maxDiscountPct, serviceFeeEnabled, shiftOpen, onHold
         </div>
       )}
 
+      {/* Qty-cap warning shown after a batch switch that reduced quantity */}
+      {qtyWarning && (
+        <div style={{
+          flexShrink: 0,
+          padding: '6px 10px', marginBottom: 6,
+          borderRadius: 6,
+          background: '#FFFBEB', border: '1px solid #FCD34D',
+        }}>
+          <p style={{ fontSize: 11, color: '#92400E', margin: 0 }}>⚠ {qtyWarning}</p>
+        </div>
+      )}
+
       {/* Cart items — scrollable */}
       <div className="flex-1 overflow-y-auto min-h-0">
         {items.length === 0 ? (
@@ -75,7 +144,11 @@ export function CartPanel({ maxDiscountPct, serviceFeeEnabled, shiftOpen, onHold
         ) : (
           <div>
             {items.map(item => (
-              <CartItemRow key={item.id} item={item} maxDiscountPct={maxDiscountPct} />
+              <CartItemRow
+                key={item.id}
+                item={item}
+                onChangeBatch={batchPickerLoading ? undefined : handleChangeBatch}
+              />
             ))}
           </div>
         )}
@@ -91,11 +164,23 @@ export function CartPanel({ maxDiscountPct, serviceFeeEnabled, shiftOpen, onHold
       {/* Action buttons */}
       <div className="mt-3 flex flex-col gap-2">
         <Button
+          icon={<CheckCircle size={14} />}
+          onClick={onCheckout}
+          disabled={items.length === 0 || !shiftOpen}
+          title={!shiftOpen ? 'Open a shift first' : undefined}
+          tabIndex={-1}
+          className="w-full"
+        >
+          Complete Sale →
+          <KbdBadge label="F5" light />
+        </Button>
+        <Button
           variant="secondary"
           icon={<RotateCcw size={14} />}
           onClick={onReturns}
           disabled={!shiftOpen}
           title={!shiftOpen ? 'Open a shift first' : undefined}
+          tabIndex={-1}
           className="w-full"
         >
           Returns
@@ -103,8 +188,20 @@ export function CartPanel({ maxDiscountPct, serviceFeeEnabled, shiftOpen, onHold
         </Button>
         <Button
           variant="secondary"
+          icon={<FlaskConical size={14} />}
+          onClick={() => {}}
+          disabled
+          tabIndex={-1}
+          className="w-full"
+        >
+          Generics
+          <KbdBadge label="F3" />
+        </Button>
+        <Button
+          variant="secondary"
           icon={<ArrowRightLeft size={14} />}
           onClick={() => setLendModalOpen(true)}
+          tabIndex={-1}
           className="w-full"
         >
           Lend to Pharmacy
@@ -114,26 +211,30 @@ export function CartPanel({ maxDiscountPct, serviceFeeEnabled, shiftOpen, onHold
           icon={<PauseCircle size={14} />}
           onClick={onHold}
           disabled={items.length === 0}
+          tabIndex={-1}
           className="w-full"
         >
           Hold Sale
           <KbdBadge label="F4" />
         </Button>
-        <Button
-          icon={<CheckCircle size={14} />}
-          onClick={onCheckout}
-          disabled={items.length === 0 || !shiftOpen}
-          title={!shiftOpen ? 'Open a shift first' : undefined}
-          className="w-full"
-        >
-          Complete Sale →
-          <KbdBadge label="F5" light />
-        </Button>
       </div>
+
       <LendToPharmacyModal
         open={lendModalOpen}
         onClose={() => setLendModalOpen(false)}
       />
+
+      {/* Batch picker overlay — position:fixed so it covers the full viewport */}
+      {batchPickerItem && (
+        <BatchPicker
+          medicineName={batchPickerItem.medicineName}
+          medicineId={batchPickerItem.medicineId}
+          batches={batchPickerBatches}
+          onSelect={handleBatchSelected}
+          onClose={closeBatchPicker}
+        />
+      )}
+
     </div>
   )
 }

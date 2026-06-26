@@ -6,11 +6,12 @@ export interface CartItem {
   medicineName:   string
   batchId:        string
   batchNo:        string
-  expiryDate:     string
-  quantity:       number
-  unitPrice:      number        // sale_price from batch
-  mrp:            number        // for display; unit_price cannot exceed this
-  discountPct:    number        // 0 – maxDiscountPct
+  expiryDate:         string | null
+  quantity:           number
+  unitPrice:          number        // sale_price from batch
+  mrp:                number        // for display; unit_price cannot exceed this
+  specialDiscountPct: number        // always 0 until Phase 5B-2 adds UI
+  discountPct:        number        // 0 – maxDiscountPct
   totalPrice:     number        // qty × unitPrice × (1 - discountPct/100)
   isControlled:   boolean       // true if schedule = 'controlled'
   isPrescription: boolean       // true if schedule = 'prescription'
@@ -65,6 +66,17 @@ export interface POSMedicineResult {
   totalStock:    number         // sum of all valid (non-expired, qty>0) batch quantities
   batches:       POSBatchOption[]
   isOutOfStock:  boolean        // true when all batches are depleted or expired
+}
+
+// ─── Batch replacement patch ─────────────────────────────────────────────────
+
+export interface BatchPatch {
+  batchId:      string
+  batchNo:      string
+  expiryDate:   string | null
+  mrp:          number
+  unitPrice:    number       // batch.sale_price — new effective sale price
+  availableQty: number       // batch.quantity — caps existing cart qty if needed
 }
 
 // ─── Return credit (exchange sale flow) ──────────────────────────────────────

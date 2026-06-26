@@ -1,7 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useReducer, useMemo } from 'react'
-import type { CartItem, Cart } from '@/lib/pos-types'
+import type { CartItem, Cart, BatchPatch } from '@/lib/pos-types'
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -28,8 +28,9 @@ type CartAction =
   | { type: 'SET_NOTES';           notes: string }
   | { type: 'SET_SERVICE_FEE';     serviceFee: number }
   | { type: 'SET_DISCOUNT_AMOUNT'; discountAmount: number }
-  | { type: 'LOAD_CART';           cart: Cart; heldSaleId: string }
+  | { type: 'LOAD_CART';            cart: Cart; heldSaleId: string }
   | { type: 'CLEAR_CART' }
+  | { type: 'REPLACE_ITEM_BATCH';  itemId: string; patch: BatchPatch }
 
 function recalcTotal(item: CartItem): number {
   return item.quantity * item.unitPrice * (1 - item.discountPct / 100)
@@ -116,6 +117,29 @@ function reducer(state: CartState, action: CartAction): CartState {
         heldSaleId:        null,
       }
 
+    case 'REPLACE_ITEM_BATCH': {
+      const { itemId, patch } = action
+      return {
+        ...state,
+        items: state.items.map(i => {
+          if (i.id !== itemId) return i
+          const qty = Math.min(i.quantity, patch.availableQty)
+          return {
+            ...i,
+            batchId:            patch.batchId,
+            batchNo:            patch.batchNo,
+            expiryDate:         patch.expiryDate,
+            mrp:                patch.mrp,
+            unitPrice:          patch.unitPrice,
+            specialDiscountPct: 0,
+            discountPct:        0,
+            totalPrice:         qty * patch.unitPrice,
+            quantity:           qty,
+          }
+        }),
+      }
+    }
+
     default:
       return state
   }
@@ -148,6 +172,7 @@ interface CartContextValue {
   setDiscountAmount: (amount: number) => void
   loadCart:          (cart: Cart, heldSaleId: string) => void
   clearCart:         () => void
+  replaceItemBatch:  (itemId: string, patch: BatchPatch) => void
 }
 
 const CartContext = createContext<CartContextValue | null>(null)
@@ -201,6 +226,7 @@ export function CartProvider({
     setDiscountAmount: (discountAmount) => dispatch({ type: 'SET_DISCOUNT_AMOUNT', discountAmount }),
     loadCart:          (cart, heldSaleId) => dispatch({ type: 'LOAD_CART', cart, heldSaleId }),
     clearCart:         () => dispatch({ type: 'CLEAR_CART' }),
+    replaceItemBatch:  (itemId, patch) => dispatch({ type: 'REPLACE_ITEM_BATCH', itemId, patch }),
   }), [state, subtotal, total])
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>

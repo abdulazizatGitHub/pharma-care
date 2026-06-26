@@ -45,6 +45,7 @@ export function MedicineResultCard({ result, showBatchLabel, onAdded }: Props) {
             </span>
             <button
               onClick={(e) => { e.stopPropagation(); setBorrowModalOpen(true) }}
+              tabIndex={-1}
               className="text-[9px] font-semibold bg-amber-500 text-white rounded px-1.5 py-0.5 hover:bg-amber-600 transition-colors"
             >
               Borrow
@@ -65,29 +66,42 @@ export function MedicineResultCard({ result, showBatchLabel, onAdded }: Props) {
   // ── Normal in-stock card ───────────────────────────────────────────────────
   if (!batch) return null
 
-  const expiryStr = new Date(batch.expiryDate).toLocaleDateString('en-GB', {
-    month: 'short', year: 'numeric',
-  })
+  const expiryStr = batch.expiryDate
+    ? new Date(batch.expiryDate).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+    : null
 
+  // Multi-batch: show batchNo + expiry so pharmacist knows which batch they're selecting.
+  // Single-batch: show packSize + batchNo (always show batchNo), expiry shown separately if packSize occupies line2.
   const line2 = showBatchLabel
-    ? `${batch.batchNo} · ${expiryStr}`
-    : (result.packSize ?? `Exp ${expiryStr}`)
+    ? `${batch.batchNo}${expiryStr ? ` · ${expiryStr}` : ''}`
+    : result.packSize
+      ? `${result.packSize} · ${batch.batchNo}`
+      : (expiryStr ? `${batch.batchNo} · ${expiryStr}` : batch.batchNo)
+
+  // When packSize occupies line2 for a single-batch card, expiry has no line2 space — show it separately.
+  const showExpiryBelow = !showBatchLabel && !!result.packSize && !!expiryStr
+
+  const hasBatchDiscount  = batch.mrp > batch.salePrice
+  const cardDiscountPct   = hasBatchDiscount && batch.mrp > 0
+    ? Math.round(((batch.mrp - batch.salePrice) / batch.mrp) * 100)
+    : 0
 
   function doAdd() {
     const item: CartItem = {
-      id:             crypto.randomUUID(),
-      medicineId:     result.medicineId,
-      medicineName:   result.medicineName,
-      batchId:        batch.batchId,
-      batchNo:        batch.batchNo,
-      expiryDate:     batch.expiryDate,
-      quantity:       1,
-      unitPrice:      batch.salePrice,
-      mrp:            batch.mrp,
-      discountPct:    0,
-      totalPrice:     batch.salePrice,
-      isControlled:   result.schedule === 'controlled',
-      isPrescription: result.schedule === 'prescription',
+      id:                 crypto.randomUUID(),
+      medicineId:         result.medicineId,
+      medicineName:       result.medicineName,
+      batchId:            batch.batchId,
+      batchNo:            batch.batchNo,
+      expiryDate:         batch.expiryDate,
+      quantity:           1,
+      unitPrice:          batch.salePrice,
+      mrp:                batch.mrp,
+      specialDiscountPct: 0,
+      discountPct:        0,
+      totalPrice:         batch.salePrice,
+      isControlled:       result.schedule === 'controlled',
+      isPrescription:     result.schedule === 'prescription',
     }
     addItem(item)
     setConfirmFlag(false)
@@ -113,7 +127,7 @@ export function MedicineResultCard({ result, showBatchLabel, onAdded }: Props) {
       }`}
       onClick={handleCardClick}
       role="button"
-      tabIndex={0}
+      tabIndex={-1}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCardClick() } }}
       aria-label={`Add ${result.medicineName} to cart`}
     >
@@ -130,12 +144,14 @@ export function MedicineResultCard({ result, showBatchLabel, onAdded }: Props) {
           <div className="flex gap-1">
             <button
               onClick={e => { e.stopPropagation(); doAdd() }}
+              tabIndex={-1}
               className="flex-1 text-[10px] font-semibold bg-[#0F6E56] text-white rounded py-1 hover:bg-[#0a5a45] transition-colors"
             >
               Confirm Add
             </button>
             <button
               onClick={e => { e.stopPropagation(); setConfirmFlag(false) }}
+              tabIndex={-1}
               className="text-[10px] text-[#6b7280] rounded py-1 px-2 hover:bg-gray-100 transition-colors"
             >
               ✕
@@ -153,6 +169,21 @@ export function MedicineResultCard({ result, showBatchLabel, onAdded }: Props) {
           <p className="text-[12px] font-bold text-[#0F6E56] leading-tight mb-0.5">
             Rs {batch.salePrice.toFixed(2)}
           </p>
+          {hasBatchDiscount && (
+            <p className="text-[10px] text-[#9ca3af] leading-tight mb-0.5">
+              MRP Rs {batch.mrp.toFixed(2)}
+            </p>
+          )}
+          {hasBatchDiscount && batch.mrp > 0 && (
+            <p className="text-[10px] font-medium text-[#0F6E56] leading-tight mb-0.5">
+              {cardDiscountPct}% off MRP
+            </p>
+          )}
+          {showExpiryBelow && (
+            <p className="text-[10px] text-[#9ca3af] leading-tight mb-0.5">
+              Exp: {expiryStr}
+            </p>
+          )}
           <p className={`text-[10px] leading-tight ${isLowStock ? 'text-amber-600 font-medium' : 'text-[#9ca3af]'}`}>
             {isLowStock ? '⚠ ' : ''}{batch.quantity} units
           </p>

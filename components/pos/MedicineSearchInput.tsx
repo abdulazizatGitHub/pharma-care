@@ -74,6 +74,8 @@ export function MedicineSearchInput({ value, onChange, onBarcodeDetected, inputR
         onChange={e => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Search medicine name, code, or scan barcode…"
+        data-pos-search="true"
+        tabIndex={-1}
         className="w-full h-10 pl-9 pr-8 rounded-lg border border-[rgba(0,0,0,0.15)] text-[13px] text-[#111827] placeholder:text-[#9ca3af] bg-white focus:outline-none focus:ring-2 focus:ring-[#0F6E56] focus:border-transparent"
         autoComplete="off"
       />

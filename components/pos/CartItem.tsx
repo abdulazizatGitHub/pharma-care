@@ -6,22 +6,25 @@ import { useCart } from '@/lib/pos-context'
 import type { CartItem as CartItemType } from '@/lib/pos-types'
 
 interface Props {
-  item:           CartItemType
-  maxDiscountPct: number
+  item:            CartItemType
+  onChangeBatch?:  (item: CartItemType) => void
 }
 
-export function CartItemRow({ item, maxDiscountPct }: Props) {
-  const { removeItem, updateQuantity, updateDiscount } = useCart()
+export function CartItemRow({ item, onChangeBatch }: Props) {
+  const { removeItem, updateQuantity } = useCart()
 
-  const expiryStr = item.isBorrowed
+  const expiryStr = item.isBorrowed || !item.expiryDate
     ? null
     : new Date(item.expiryDate).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
 
   const lineBeforeDiscount = item.quantity * item.unitPrice
-  const hasDiscount        = item.discountPct > 0
   const borrowMargin       = item.isBorrowed && item.borrowCost != null
     ? item.unitPrice - item.borrowCost
     : null
+  const patientDiscountAmt = (item.mrp - item.unitPrice) * item.quantity
+  const patientDiscountPct = item.mrp > 0
+    ? Math.round(((item.mrp - item.unitPrice) / item.mrp) * 100)
+    : 0
 
   return (
     <div className="py-3 border-b border-[rgba(0,0,0,0.06)] last:border-0">
@@ -44,8 +47,26 @@ export function CartItemRow({ item, maxDiscountPct }: Props) {
               )}
             </p>
           ) : (
-            <p className="text-[10px] text-[#9ca3af]">
-              Batch: {item.batchNo} · Exp: {expiryStr}
+            <p className="text-[10px] text-[#9ca3af] flex items-center gap-1.5">
+              Batch: {item.batchNo}{expiryStr ? ` · Exp: ${expiryStr}` : ''}
+              {onChangeBatch && (
+                <button
+                  onClick={() => onChangeBatch(item)}
+                  tabIndex={-1}
+                  style={{
+                    fontSize: 9,
+                    padding: '1px 5px',
+                    borderRadius: 3,
+                    border: '1px solid #0F6E56',
+                    color: '#0F6E56',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    marginLeft: 4,
+                  }}
+                >
+                  Change batch
+                </button>
+              )}
             </p>
           )}
           {(item.isControlled || item.isPrescription) && (
@@ -59,6 +80,7 @@ export function CartItemRow({ item, maxDiscountPct }: Props) {
         </div>
         <button
           onClick={() => removeItem(item.id)}
+          tabIndex={-1}
           className="shrink-0 w-6 h-6 flex items-center justify-center rounded text-[#e53e3e] hover:bg-rose-50 transition-colors"
           aria-label={`Remove ${item.medicineName}`}
         >
@@ -86,6 +108,7 @@ export function CartItemRow({ item, maxDiscountPct }: Props) {
           <button
             onClick={() => updateQuantity(item.id, item.quantity - 1)}
             disabled={item.quantity <= 1}
+            tabIndex={-1}
             className="w-6 h-6 flex items-center justify-center text-[#6b7280] hover:bg-[#f3f4f6] disabled:opacity-40 transition-colors"
             aria-label="Decrease quantity"
           >
@@ -95,12 +118,14 @@ export function CartItemRow({ item, maxDiscountPct }: Props) {
             type="number"
             min="1"
             value={item.quantity}
+            data-qty-input={item.id}
             onChange={e => updateQuantity(item.id, parseInt(e.target.value, 10) || 1)}
             className="w-9 h-6 text-center text-[11px] text-[#111827] border-x border-[rgba(0,0,0,0.1)] focus:outline-none focus:ring-1 focus:ring-[#0F6E56]"
             aria-label="Quantity"
           />
           <button
             onClick={() => updateQuantity(item.id, item.quantity + 1)}
+            tabIndex={-1}
             className="w-6 h-6 flex items-center justify-center text-[#6b7280] hover:bg-[#f3f4f6] transition-colors"
             aria-label="Increase quantity"
           >
@@ -124,34 +149,22 @@ export function CartItemRow({ item, maxDiscountPct }: Props) {
         </span>
       </div>
 
-      {/* Discount + final total */}
-      {maxDiscountPct > 0 && (
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[11px] text-[#6b7280]">Discount:</span>
-          <select
-            value={item.discountPct}
-            onChange={e => updateDiscount(item.id, parseInt(e.target.value, 10))}
-            className="h-6 px-1.5 rounded border border-[rgba(0,0,0,0.15)] text-[11px] text-[#111827] bg-white focus:outline-none focus:ring-1 focus:ring-[#0F6E56]"
-            aria-label="Discount %"
-          >
-            {Array.from({ length: maxDiscountPct + 1 }, (_, i) => (
-              <option key={i} value={i}>{i}%</option>
-            ))}
-          </select>
-          <span className="ml-auto text-[12px] font-semibold" style={{ color: hasDiscount ? '#0F6E56' : '#111827' }}>
-            Rs {item.totalPrice.toFixed(2)}
+      {/* Patient (MRP → sale price) discount line */}
+      {item.mrp > item.unitPrice && (
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-[10px] text-[#9ca3af]">
+            MRP discount: {patientDiscountPct}% · –Rs {patientDiscountAmt.toFixed(2)}
           </span>
         </div>
       )}
 
-      {/* Total without discount row (when no discount selector) */}
-      {maxDiscountPct === 0 && (
-        <div className="flex justify-end mt-1">
-          <span className="text-[12px] font-semibold text-[#111827]">
-            Rs {item.totalPrice.toFixed(2)}
-          </span>
-        </div>
-      )}
+      {/* Line total */}
+      <div className="flex justify-end items-center gap-2 mt-1">
+        <span className="text-[11px] text-[#6b7280]">Total:</span>
+        <span className="text-[12px] font-semibold text-[#111827]">
+          Rs {item.totalPrice.toFixed(2)}
+        </span>
+      </div>
     </div>
   )
 }

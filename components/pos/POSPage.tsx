@@ -1,15 +1,18 @@
 'use client'
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { CartProvider } from '@/lib/pos-context'
-import { SearchPanel }    from './SearchPanel'
-import { CartPanel }      from './CartPanel'
-import { HoldSaleModal }  from './HoldSaleModal'
-import { CheckoutModal }  from './CheckoutModal'
-import { ReturnMode }     from '@/components/returns/ReturnMode'
-import { usePOSHeader }   from '@/lib/pos-header-context'
+import { CartProvider }              from '@/lib/pos-context'
+import { CardLayout }                from './layouts/CardLayout'
+import type { CardLayoutHandle }     from './layouts/CardLayout'
+import { TableLayout }               from './layouts/TableLayout'
+import { MixedLayout }               from './layouts/MixedLayout'
+import { CartPanel }                 from './CartPanel'
+import { HoldSaleModal }             from './HoldSaleModal'
+import { CheckoutModal }             from './CheckoutModal'
+import { ReturnMode }                from '@/components/returns/ReturnMode'
+import { usePOSHeader }              from '@/lib/pos-header-context'
 import type { ParkedSale, POSMedicineResult, ReturnCredit } from '@/lib/pos-types'
-import type { ShiftRow } from '@/app/actions/shifts'
+import type { ShiftRow }             from '@/app/actions/shifts'
 
 interface Props {
   cashierId:          string
@@ -33,12 +36,13 @@ interface Props {
 type POSMode = 'sale' | 'return'
 
 const SHORTCUTS = [
-  { key: '/',     label: 'Focus medicine search' },
-  { key: 'F4',    label: 'Hold current sale' },
-  { key: 'F5',    label: 'Complete sale / checkout' },
-  { key: 'F6',    label: 'Enter return mode' },
-  { key: 'Esc',   label: 'Exit current mode / close modal' },
-  { key: '? ',    label: 'Show this help' },
+  { key: '/',   label: 'Focus medicine search' },
+  { key: 'F4',  label: 'Hold current sale' },
+  { key: 'F5',  label: 'Complete sale / checkout (card layout)' },
+  { key: 'F9',  label: 'Complete sale (table / mixed layout)' },
+  { key: 'F6',  label: 'Enter return mode' },
+  { key: 'Esc', label: 'Exit current mode / close modal' },
+  { key: '?',   label: 'Show this help' },
 ]
 
 export function POSPage({
@@ -66,26 +70,21 @@ export function POSPage({
   const [showHelp,      setShowHelp]      = useState(false)
   const [returnCredit,  setReturnCredit]  = useState<ReturnCredit | null>(null)
 
-  const searchInputRef = useRef<HTMLInputElement>(null)
+  // Ref for card layout — allows programmatic focus of the search input via F2
+  const cardRef = useRef<CardLayoutHandle | null>(null)
 
   // ── POS header context ───────────────────────────────────────────────────
 
-  const { setShift, setPosMode, setExitFn } = usePOSHeader()
+  const { setShift, setPosMode, setExitFn, layout, setLayout } = usePOSHeader()
 
-  // Sync shift to header
   useEffect(() => { setShift(currentShift) }, [currentShift, setShift])
 
-  // Sync mode to header
   useEffect(() => {
     setPosMode(mode === 'sale' ? 'sale' : 'return')
   }, [mode, setPosMode])
 
-  // Exit return overlay
-  const exitReturn = useCallback(() => {
-    setMode('sale')
-  }, [])
+  const exitReturn = useCallback(() => { setMode('sale') }, [])
 
-  // Exchange start: close return overlay, apply return credit to cart
   const handleExchangeStart = useCallback((credit: ReturnCredit) => {
     setMode('sale')
     setReturnCredit(credit)
@@ -96,31 +95,45 @@ export function POSPage({
     return () => setExitFn(null)
   }, [exitReturn, setExitFn])
 
+  // ── Layout persistence ───────────────────────────────────────────────────
+
+  // Read saved layout on mount; cashierId and setLayout never change after mount
+  useEffect(() => {
+    const saved = localStorage.getItem(`pos_layout_${cashierId}`)
+    if (saved === 'card' || saved === 'table' || saved === 'mixed') {
+      setLayout(saved)
+    }
+  }, [cashierId, setLayout])
+
+  // Write whenever layout changes
+  useEffect(() => {
+    localStorage.setItem(`pos_layout_${cashierId}`, layout)
+  }, [layout, cashierId])
+
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
 
   useEffect(() => {
     function handler(e: KeyboardEvent) {
-      // Dismiss help overlay on any key
       if (showHelp) { setShowHelp(false); return }
 
-      // Return overlay: Escape closes
       if (e.key === 'Escape' && mode === 'return') {
         e.preventDefault()
         setMode('sale')
         return
       }
 
-      // Sale mode shortcuts
       if (mode === 'sale') {
         if (e.key === 'F4') { e.preventDefault(); setHoldModalOpen(true) }
-        if (e.key === 'F5') { e.preventDefault(); setCheckoutOpen(true) }
+        // F5 = checkout only in card layout; table/mixed use F9 and handle it internally.
+        // Without this guard, pressing F5 in table/mixed would open both checkout AND hold modals.
+        if (e.key === 'F5' && layout === 'card') { e.preventDefault(); setCheckoutOpen(true) }
         if (e.key === 'F6') { e.preventDefault(); if (currentShift) setMode('return') }
         if (e.key === '?')  { e.preventDefault(); setShowHelp(true) }
       }
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [mode, currentShift, showHelp])
+  }, [mode, currentShift, showHelp, layout])
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -130,6 +143,20 @@ export function POSPage({
 
   function handleResume(saleId: string) {
     setParkedSales(prev => prev.filter(p => p.saleId !== saleId))
+  }
+
+  // Shared props for table + mixed layouts (card uses CardLayout+CartPanel directly)
+  const sharedLayoutProps = {
+    initialMedicines:  initialMedicines,
+    parkedSales:       parkedSales,
+    onResume:          handleResume,
+    maxDiscountPct:    maxDiscountPct,
+    serviceFeeEnabled: serviceFeeEnabled,
+    shiftOpen:         !!currentShift,
+    onHold:            () => setHoldModalOpen(true),
+    onCheckout:        () => setCheckoutOpen(true),
+    onReturns:         () => { if (currentShift) setMode('return') },
+    returnCredit:      returnCredit,
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -142,38 +169,56 @@ export function POSPage({
     >
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
 
-        {/* POS content — always rendered */}
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          <div className="flex h-full gap-0 overflow-hidden" style={{ minHeight: 0 }}>
-            <div
-              className="flex flex-col border-r border-[rgba(0,0,0,0.08)] overflow-hidden"
-              style={{ flex: '0 0 55%', padding: '16px 14px 16px 16px' }}
-            >
-              <SearchPanel
-                initialMedicines={initialMedicines}
-                parkedSales={parkedSales}
-                onResume={handleResume}
-                searchRef={searchInputRef}
-              />
+
+          {/* ── Card layout: original 55/45 split — identical to pre-Phase-5B ── */}
+          {layout === 'card' && (
+            <div className="flex h-full gap-0 overflow-hidden" style={{ minHeight: 0 }}>
+              <div
+                className="flex flex-col border-r border-[rgba(0,0,0,0.08)] overflow-hidden"
+                style={{ flex: '0 0 55%', padding: '16px 14px 16px 16px' }}
+              >
+                <CardLayout
+                  ref={cardRef}
+                  initialMedicines={initialMedicines}
+                  parkedSales={parkedSales}
+                  onResume={handleResume}
+                />
+              </div>
+              <div
+                className="flex flex-col overflow-hidden"
+                style={{ flex: '0 0 45%', padding: '16px 16px 16px 14px' }}
+              >
+                <CartPanel
+                  maxDiscountPct={maxDiscountPct}
+                  serviceFeeEnabled={serviceFeeEnabled}
+                  shiftOpen={!!currentShift}
+                  onHold={() => setHoldModalOpen(true)}
+                  onCheckout={() => setCheckoutOpen(true)}
+                  onReturns={() => { if (currentShift) setMode('return') }}
+                  returnCredit={returnCredit}
+                />
+              </div>
             </div>
-            <div
-              className="flex flex-col overflow-hidden"
-              style={{ flex: '0 0 45%', padding: '16px 16px 16px 14px' }}
-            >
-              <CartPanel
-                maxDiscountPct={maxDiscountPct}
-                serviceFeeEnabled={serviceFeeEnabled}
-                shiftOpen={!!currentShift}
-                onHold={() => setHoldModalOpen(true)}
-                onCheckout={() => setCheckoutOpen(true)}
-                onReturns={() => { if (currentShift) setMode('return') }}
-                returnCredit={returnCredit}
-              />
+          )}
+
+          {/* ── Table layout: full-width with top search bar ── */}
+          {layout === 'table' && (
+            <div className="h-full overflow-hidden" style={{ padding: '16px' }}>
+              <TableLayout {...sharedLayoutProps} />
             </div>
-          </div>
+          )}
+
+          {/* ── Mixed layout: CardLayout left (60%) + compact cart right (40%) ── */}
+          {layout === 'mixed' && (
+            <div className="h-full overflow-hidden" style={{ padding: '16px' }}>
+              <MixedLayout {...sharedLayoutProps} />
+            </div>
+          )}
+
         </div>
 
-        {/* Return / exchange overlay */}
+        {/* Return / exchange overlay — rendered above all layout variants */}
         {mode === 'return' && (
           <ReturnMode
             onExit={exitReturn}
@@ -195,10 +240,8 @@ export function POSPage({
         >
           <div
             style={{
-              background: 'white',
-              borderRadius: 12,
-              padding: '20px 24px',
-              minWidth: 280,
+              background: 'white', borderRadius: 12,
+              padding: '20px 24px', minWidth: 280,
               boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
             }}
             onClick={e => e.stopPropagation()}
@@ -229,7 +272,7 @@ export function POSPage({
         </div>
       )}
 
-      {/* Modals */}
+      {/* ── Modals ── */}
       <HoldSaleModal
         open={holdModalOpen}
         onClose={() => setHoldModalOpen(false)}

@@ -15,7 +15,7 @@ export interface ReceiptContentProps {
   saleTime:          Date
   items:             CartItem[]
   subtotal:          number        // sum of item totalPrices (after per-item discounts)
-  discountAmount:    number        // sale-level overall discount
+  discountAmount:    number        // sale-level overall discount (cashier override)
   serviceFee:        number        // from settings (DB column: bag_charge)
   serviceFeeLabel:   string        // e.g. "Service Fee", "Handling Fee"
   serviceFeeEnabled: boolean       // whether to show the fee row
@@ -85,7 +85,13 @@ export function ReceiptContent({
     hour: '2-digit', minute: '2-digit', hour12: false,
   })
 
-  const showSubtotal = discountAmount > 0 || (serviceFeeEnabled && serviceFee > 0)
+  const fmt = (n: number) =>
+    n.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const grossAtMRP      = items.reduce((sum, i) => sum + i.mrp * i.quantity, 0)
+  const patientDiscount = items.reduce((sum, i) => sum + Math.max(0, i.mrp - i.unitPrice) * i.quantity, 0)
+  const netValue        = subtotal
+  const hasAnyDiscount  = items.some(i => i.mrp > i.unitPrice)
 
   return (
     <div className="text-[11px] leading-snug">
@@ -104,19 +110,21 @@ export function ReceiptContent({
 
       {/* Meta */}
       <div className="space-y-0.5 my-1.5">
-        <MetaRow label="Date:" value={dateStr} />
-        <MetaRow label="Time:" value={timeStr} />
-        {showReceiptNo && <MetaRow label="Receipt No:" value={receiptNo ?? '---'} bold />}
-        {showCashierName && <MetaRow label="Cashier:" value={cashierName} />}
-        {customerName && <MetaRow label="Customer:" value={customerName} />}
+        <MetaRow label="Date:"    value={dateStr} />
+        <MetaRow label="Time:"    value={timeStr} />
+        {showReceiptNo  && <MetaRow label="Receipt No:" value={receiptNo ?? '---'} bold />}
+        {showCashierName && <MetaRow label="Cashier:"   value={cashierName} />}
+        {customerName   && <MetaRow label="Customer:"   value={customerName} />}
       </div>
       <HDivider />
 
-      {/* Column headers */}
+      {/* Column headers — 5 cols if any item has a discount, otherwise 4 */}
       <div className="flex text-[10px] font-bold text-[#374151] my-0.5">
         <span className="flex-1">ITEM</span>
         <span className="w-7 text-right">QTY</span>
-        <span className="w-20 text-right">AMOUNT</span>
+        <span className="w-14 text-right">MRP</span>
+        {hasAnyDiscount && <span className="w-12 text-right text-[#0F6E56]">DISC</span>}
+        <span className="w-16 text-right">AMT</span>
       </div>
       <HDivider />
 
@@ -126,22 +134,18 @@ export function ReceiptContent({
           <p className="text-[#9ca3af] text-center">No items</p>
         ) : (
           items.map(item => {
-            const itemDiscAmt = item.discountPct > 0
-              ? item.quantity * item.unitPrice - item.totalPrice
-              : 0
+            const itemDiscAmt = Math.max(0, item.mrp - item.unitPrice) * item.quantity
             return (
-              <div key={item.id}>
-                <div className="flex">
-                  <span className="flex-1 pr-1 font-medium text-[#111827] wrap-break-word">{item.medicineName}</span>
-                  <span className="w-7 text-right shrink-0">{item.quantity}</span>
-                  <span className="w-20 text-right shrink-0">Rs {item.totalPrice.toFixed(2)}</span>
-                </div>
-                {item.discountPct > 0 && (
-                  <div className="flex pl-3 text-[10px] text-[#0F6E56]">
-                    <span className="flex-1">Discount {item.discountPct}%</span>
-                    <span className="w-20 text-right">-Rs {itemDiscAmt.toFixed(2)}</span>
-                  </div>
+              <div key={item.id} className="flex">
+                <span className="flex-1 pr-1 font-medium text-[#111827] wrap-break-word">{item.medicineName}</span>
+                <span className="w-7 text-right shrink-0">{item.quantity}</span>
+                <span className="w-14 text-right shrink-0">Rs {fmt(item.mrp)}</span>
+                {hasAnyDiscount && (
+                  <span className="w-12 text-right shrink-0 text-[#0F6E56]">
+                    {itemDiscAmt > 0 ? `Rs ${fmt(itemDiscAmt)}` : '—'}
+                  </span>
                 )}
+                <span className="w-16 text-right shrink-0">Rs {fmt(item.totalPrice)}</span>
               </div>
             )
           })
@@ -149,16 +153,20 @@ export function ReceiptContent({
       </div>
       <HDivider />
 
-      {/* Totals */}
+      {/* Totals breakdown */}
       <div className="space-y-0.5 my-1.5">
-        {showSubtotal && (
-          <TotalRow label="Subtotal:" value={`Rs ${subtotal.toFixed(2)}`} muted />
+        {hasAnyDiscount && (
+          <TotalRow label="Gross Value (at MRP):" value={`Rs ${fmt(grossAtMRP)}`}      muted />
         )}
+        {hasAnyDiscount && (
+          <TotalRow label="Patient Discount:"      value={`-Rs ${fmt(patientDiscount)}`} green />
+        )}
+        <TotalRow label="Net Value:" value={`Rs ${fmt(netValue)}`} />
         {discountAmount > 0 && (
-          <TotalRow label="Discount:" value={`-Rs ${discountAmount.toFixed(2)}`} green />
+          <TotalRow label="Sale Discount:" value={`-Rs ${fmt(discountAmount)}`} green />
         )}
         {serviceFeeEnabled && serviceFee > 0 && (
-          <TotalRow label={`${serviceFeeLabel}:`} value={`Rs ${serviceFee.toFixed(2)}`} muted />
+          <TotalRow label={`${serviceFeeLabel}:`} value={`Rs ${fmt(serviceFee)}`} muted />
         )}
       </div>
       <HDivider double />
@@ -166,14 +174,14 @@ export function ReceiptContent({
       {/* Total */}
       <div className="flex justify-between font-bold text-[13px] my-1">
         <span>TOTAL:</span>
-        <span>Rs {total.toFixed(2)}</span>
+        <span>Rs {fmt(total)}</span>
       </div>
 
       {/* Payment */}
       {paymentType === 'cash' && amountPaid > 0 && (
         <div className="space-y-0.5">
-          <TotalRow label="Cash received:" value={`Rs ${amountPaid.toFixed(2)}`} />
-          <TotalRow label="Change:"        value={`Rs ${change.toFixed(2)}`} />
+          <TotalRow label="Cash Received:" value={`Rs ${fmt(amountPaid)}`} />
+          <TotalRow label="Change:"        value={`Rs ${fmt(change)}`} />
         </div>
       )}
       {paymentType === 'credit' && (

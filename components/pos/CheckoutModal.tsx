@@ -52,10 +52,12 @@ function printReceipt(html: string) {
     .divider { border-top: 2px solid #000; margin: 4px 0; }
     .dashed  { border-top: 1px dashed #000; margin: 4px 0; }
     .row  { display: flex; justify-content: space-between; margin-bottom: 2px; }
-    .irow { display: flex; margin-bottom: 2px; }
+    .irow { display: flex; margin-bottom: 2px; align-items: baseline; }
     .iname { flex: 1; padding-right: 4px; word-break: break-word; }
-    .iqty  { width: 24px; text-align: right; margin-right: 6px; flex-shrink: 0; }
-    .iamt  { width: 80px; text-align: right; flex-shrink: 0; }
+    .iqty  { width: 20px; text-align: right; margin-right: 4px; flex-shrink: 0; }
+    .imrp  { width: 52px; text-align: right; margin-right: 4px; flex-shrink: 0; }
+    .idisc { width: 46px; text-align: right; margin-right: 4px; flex-shrink: 0; color: #0a7a4f; }
+    .iamt  { width: 60px; text-align: right; flex-shrink: 0; }
     .bold   { font-weight: bold; }
     .center { text-align: center; }
     .total  { font-size: 13px; font-weight: bold; margin: 2px 0; }
@@ -129,27 +131,32 @@ export function CheckoutModal({
     const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
 
-    const showSubtotal = discountAmount > 0 || (serviceFeeEnabled && serviceFee > 0)
+    const fmt = (n: number) =>
+      n.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+    const grossAtMRP      = items.reduce((sum, i) => sum + i.mrp * i.quantity, 0)
+    const patientDiscount = items.reduce((sum, i) => sum + Math.max(0, i.mrp - i.unitPrice) * i.quantity, 0)
+    const netValue        = subtotal
+    const hasAnyDiscount  = items.some(i => i.mrp > i.unitPrice)
 
     const itemRows = items.map(item => {
-      const itemDiscAmt = item.discountPct > 0
-        ? item.quantity * item.unitPrice - item.totalPrice
-        : 0
-      const discLine = item.discountPct > 0
-        ? `<div class="irow green small" style="padding-left:10px;">
-             <span>Discount ${item.discountPct}%</span>
-             <span style="margin-left:auto;">-Rs ${itemDiscAmt.toFixed(2)}</span>
-           </div>`
+      const itemDiscAmt = Math.max(0, item.mrp - item.unitPrice) * item.quantity
+      const discCell    = hasAnyDiscount
+        ? `<span class="idisc">${itemDiscAmt > 0 ? `Rs ${fmt(itemDiscAmt)}` : '&mdash;'}</span>`
         : ''
       return `
         <div class="irow">
           <span class="iname">${escHtml(item.medicineName)}</span>
           <span class="iqty">${item.quantity}</span>
-          <span class="iamt">Rs ${item.totalPrice.toFixed(2)}</span>
-        </div>
-        ${discLine}`
+          <span class="imrp">Rs ${fmt(item.mrp)}</span>
+          ${discCell}
+          <span class="iamt">Rs ${fmt(item.totalPrice)}</span>
+        </div>`
     }).join('')
 
+    const discColHeader  = hasAnyDiscount
+      ? `<span class="idisc" style="font-weight:bold; color:#0a7a4f;">DISC</span>`
+      : ''
     const headerNoteRow  = headerNote.trim()
       ? `<div class="center small">${escHtml(headerNote.trim())}</div>`
       : ''
@@ -165,18 +172,21 @@ export function CheckoutModal({
     const customerRow    = customerName
       ? `<div class="row"><span>Customer:</span><span>${escHtml(customerName)}</span></div>`
       : ''
-    const subtotalRow    = showSubtotal
-      ? `<div class="row muted"><span>Subtotal:</span><span>Rs ${subtotal.toFixed(2)}</span></div>`
+    const grossRow       = hasAnyDiscount
+      ? `<div class="row muted"><span>Gross Value (at MRP):</span><span>Rs ${fmt(grossAtMRP)}</span></div>`
       : ''
-    const discountRow    = discountAmount > 0
-      ? `<div class="row green"><span>Discount:</span><span>-Rs ${discountAmount.toFixed(2)}</span></div>`
+    const patientDiscRow = hasAnyDiscount
+      ? `<div class="row green"><span>Patient Discount:</span><span>-Rs ${fmt(patientDiscount)}</span></div>`
+      : ''
+    const saleDiscRow    = discountAmount > 0
+      ? `<div class="row green"><span>Sale Discount:</span><span>-Rs ${fmt(discountAmount)}</span></div>`
       : ''
     const serviceFeeRow  = serviceFeeEnabled && serviceFee > 0
-      ? `<div class="row muted"><span>${escHtml(serviceFeeLabel)}:</span><span>Rs ${serviceFee.toFixed(2)}</span></div>`
+      ? `<div class="row muted"><span>${escHtml(serviceFeeLabel)}:</span><span>Rs ${fmt(serviceFee)}</span></div>`
       : ''
     const paymentRows    = paymentType === 'cash'
-      ? `<div class="row"><span>Cash received:</span><span>Rs ${amountPaid.toFixed(2)}</span></div>
-         <div class="row"><span>Change:</span><span>Rs ${receiptChange.toFixed(2)}</span></div>`
+      ? `<div class="row"><span>Cash Received:</span><span>Rs ${fmt(amountPaid)}</span></div>
+         <div class="row"><span>Change:</span><span>Rs ${fmt(receiptChange)}</span></div>`
       : `<div class="row"><span>Payment:</span><span>Credit (Udhaar)</span></div>`
     const returnRow      = returnPolicy.trim()
       ? `<div class="center small" style="margin-top:4px;">${escHtml(returnPolicy.trim())}</div>`
@@ -196,16 +206,20 @@ export function CheckoutModal({
       <div class="irow" style="font-weight:bold; font-size:10px;">
         <span class="iname">ITEM</span>
         <span class="iqty">QTY</span>
+        <span class="imrp">MRP</span>
+        ${discColHeader}
         <span class="iamt">AMOUNT</span>
       </div>
       <div class="dashed"></div>
       ${itemRows}
       <div class="dashed"></div>
-      ${subtotalRow}
-      ${discountRow}
+      ${grossRow}
+      ${patientDiscRow}
+      <div class="row"><span>Net Value:</span><span>Rs ${fmt(netValue)}</span></div>
+      ${saleDiscRow}
       ${serviceFeeRow}
       <div class="divider"></div>
-      <div class="row total"><span>TOTAL:</span><span>Rs ${total.toFixed(2)}</span></div>
+      <div class="row total"><span>TOTAL:</span><span>Rs ${fmt(total)}</span></div>
       ${paymentRows}
       <div class="divider"></div>
       <div class="center" style="font-size:11px;">${escHtml(receiptFooter)}</div>

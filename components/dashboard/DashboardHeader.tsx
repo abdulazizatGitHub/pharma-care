@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { Bell, Menu } from 'lucide-react'
 import { ICON_SIZE } from '@/lib/design-tokens'
 import { usePOSHeader } from '@/lib/pos-header-context'
+import type { POSLayout } from '@/lib/pos-header-context'
 import { OpenShiftModal } from '@/components/shifts/OpenShiftModal'
 import { CloseShiftModal } from '@/components/shifts/CloseShiftModal'
 
@@ -68,7 +69,13 @@ export function DashboardHeader({ userFullName, pharmacyName, onMenuClick }: Pro
   }, [isPOS])
 
   // POS header context
-  const { shift } = usePOSHeader()
+  const { shift, layout, setLayout } = usePOSHeader()
+
+  const LAYOUT_LABELS: { value: POSLayout; label: string }[] = [
+    { value: 'card',  label: 'Card'  },
+    { value: 'table', label: 'Table' },
+    { value: 'mixed', label: 'Mixed' },
+  ]
 
   // Shift modals
   const [openShiftModal,  setOpenShiftModal]  = useState(false)
@@ -168,8 +175,31 @@ export function DashboardHeader({ userFullName, pharmacyName, onMenuClick }: Pro
           <div className="flex-1" />
         )}
 
-        {/* Right: clock/date + bell + avatar */}
+        {/* Right: layout toggle (POS only) + clock/date + bell + avatar */}
         <div className="flex items-center gap-3 shrink-0">
+          {isPOS && (
+            <div style={{ display: 'flex', border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'hidden' }}>
+              {LAYOUT_LABELS.map(({ value, label }, i) => (
+                <button
+                  key={value}
+                  onClick={() => setLayout(value)}
+                  style={{
+                    padding: '3px 9px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    lineHeight: 1.6,
+                    background: layout === value ? '#0F6E56' : 'white',
+                    color:      layout === value ? 'white'   : '#6b7280',
+                    border: 'none',
+                    borderRight: i < LAYOUT_LABELS.length - 1 ? '1px solid #e5e7eb' : 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <span
             className="hidden sm:block"
             style={{ fontSize: 12, color: '#6b7280', fontFamily: isPOS ? 'monospace' : 'inherit', whiteSpace: 'nowrap' }}
