@@ -5,6 +5,8 @@ import { MedicineSearchInput } from './MedicineSearchInput'
 import { MedicineResultCard } from './MedicineResultCard'
 import { ParkedSalesList } from './ParkedSalesList'
 import { searchMedicinesForPOS } from '@/app/actions/sales'
+import { useCart } from '@/lib/pos-context'
+import { focusLastQtyInput } from '@/lib/pos-shortcuts'
 import type { POSMedicineResult, ParkedSale } from '@/lib/pos-types'
 
 interface Props {
@@ -25,9 +27,11 @@ function flattenPerBatch(meds: POSMedicineResult[]): POSMedicineResult[] {
 }
 
 export function SearchPanel({ initialMedicines, parkedSales, onResume, searchRef }: Props) {
-  const [query,     setQuery]     = useState('')
-  const [results,   setResults]   = useState<POSMedicineResult[]>([])
-  const [searching, setSearching] = useState(false)
+  const { addItem } = useCart()
+  const [query,          setQuery]          = useState('')
+  const [results,        setResults]        = useState<POSMedicineResult[]>([])
+  const [searching,      setSearching]      = useState(false)
+  const [highlightedIdx, setHighlightedIdx] = useState(-1)
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -41,6 +45,7 @@ export function SearchPanel({ initialMedicines, parkedSales, onResume, searchRef
 
   function handleQueryChange(q: string) {
     setQuery(q)
+    setHighlightedIdx(-1)
     if (debounceTimer.current) clearTimeout(debounceTimer.current)
     debounceTimer.current = setTimeout(() => runSearch(q), 100)
   }
@@ -53,6 +58,42 @@ export function SearchPanel({ initialMedicines, parkedSales, onResume, searchRef
   function handleAdded() {
     setQuery('')
     setResults([])
+    setHighlightedIdx(-1)
+  }
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (flatCards.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setHighlightedIdx(prev => Math.min(prev + 1, flatCards.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setHighlightedIdx(prev => Math.max(prev - 1, -1))
+    } else if (e.key === 'Enter' && highlightedIdx >= 0) {
+      e.preventDefault()
+      const result = flatCards[highlightedIdx]
+      if (!result.isOutOfStock && result.batches[0]) {
+        const batch = result.batches[0]
+        addItem({
+          id:                 crypto.randomUUID(),
+          medicineId:         result.medicineId,
+          medicineName:       result.medicineName,
+          batchId:            batch.batchId,
+          batchNo:            batch.batchNo,
+          expiryDate:         batch.expiryDate,
+          quantity:           1,
+          unitPrice:          batch.salePrice,
+          mrp:                batch.mrp,
+          specialDiscountPct: 0,
+          discountPct:        0,
+          totalPrice:         batch.salePrice,
+          isControlled:       result.schedule === 'controlled',
+          isPrescription:     result.schedule === 'prescription',
+        })
+        focusLastQtyInput()
+        handleAdded()
+      }
+    }
   }
 
   const isSearching      = query.trim().length >= 1
@@ -72,6 +113,7 @@ export function SearchPanel({ initialMedicines, parkedSales, onResume, searchRef
           onChange={handleQueryChange}
           onBarcodeDetected={handleBarcodeDetected}
           inputRef={searchRef}
+          onKeyDown={handleSearchKeyDown}
         />
       </div>
 
@@ -104,6 +146,7 @@ export function SearchPanel({ initialMedicines, parkedSales, onResume, searchRef
                   result={result}
                   showBatchLabel={(medicineIdCounts.get(result.medicineId) ?? 0) > 1}
                   onAdded={handleAdded}
+                  highlighted={idx === highlightedIdx}
                 />
               ))}
             </div>

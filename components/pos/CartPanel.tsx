@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/Button'
 import { CartItemRow } from './CartItem'
 import { CartTotals } from './CartTotals'
 import { BatchPicker } from './BatchPicker'
-import { LendToPharmacyModal } from './LendToPharmacyModal'
 import { getBatchesForMedicine } from '@/app/actions/stock'
 import { useCart } from '@/lib/pos-context'
 import type { BatchForDropdown } from '@/app/actions/stock'
@@ -39,6 +38,8 @@ interface Props {
   onHold:            () => void
   onCheckout:        () => void
   onReturns:         () => void
+  onCompareGenerics: () => void
+  onLend:            () => void
   returnCredit?:     ReturnCredit | null
 }
 
@@ -49,11 +50,12 @@ export function CartPanel({
   onHold,
   onCheckout,
   onReturns,
+  onCompareGenerics,
+  onLend,
   returnCredit,
 }: Props) {
   const { items, replaceItemBatch } = useCart()
 
-  const [lendModalOpen,      setLendModalOpen]      = useState(false)
   const [batchPickerItem,    setBatchPickerItem]    = useState<CartItemType | null>(null)
   const [batchPickerBatches, setBatchPickerBatches] = useState<BatchForDropdown[]>([])
   const [batchPickerLoading, setBatchPickerLoading] = useState(false)
@@ -172,7 +174,7 @@ export function CartPanel({
           className="w-full"
         >
           Complete Sale →
-          <KbdBadge label="F5" light />
+          <KbdBadge label="F9" light />
         </Button>
         <Button
           variant="secondary"
@@ -189,8 +191,8 @@ export function CartPanel({
         <Button
           variant="secondary"
           icon={<FlaskConical size={14} />}
-          onClick={() => {}}
-          disabled
+          onClick={onCompareGenerics}
+          disabled={items.length === 0}
           tabIndex={-1}
           className="w-full"
         >
@@ -200,11 +202,12 @@ export function CartPanel({
         <Button
           variant="secondary"
           icon={<ArrowRightLeft size={14} />}
-          onClick={() => setLendModalOpen(true)}
+          onClick={onLend}
           tabIndex={-1}
           className="w-full"
         >
           Lend to Pharmacy
+          <KbdBadge label="F8" />
         </Button>
         <Button
           variant="secondary"
@@ -218,11 +221,6 @@ export function CartPanel({
           <KbdBadge label="F4" />
         </Button>
       </div>
-
-      <LendToPharmacyModal
-        open={lendModalOpen}
-        onClose={() => setLendModalOpen(false)}
-      />
 
       {/* Batch picker overlay — position:fixed so it covers the full viewport */}
       {batchPickerItem && (

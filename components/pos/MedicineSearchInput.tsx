@@ -8,9 +8,10 @@ interface Props {
   onChange:          (query: string) => void
   onBarcodeDetected: (barcode: string) => void
   inputRef?:         React.RefObject<HTMLInputElement | null>
+  onKeyDown?:        (e: React.KeyboardEvent<HTMLInputElement>) => void
 }
 
-export function MedicineSearchInput({ value, onChange, onBarcodeDetected, inputRef: externalRef }: Props) {
+export function MedicineSearchInput({ value, onChange, onBarcodeDetected, inputRef: externalRef, onKeyDown: externalKeyDown }: Props) {
   const internalRef = useRef<HTMLInputElement>(null)
   const ref = externalRef ?? internalRef
 
@@ -72,7 +73,7 @@ export function MedicineSearchInput({ value, onChange, onBarcodeDetected, inputR
         type="text"
         value={value}
         onChange={e => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
+        onKeyDown={e => { externalKeyDown?.(e); handleKeyDown(e) }}
         placeholder="Search medicine name, code, or scan barcode…"
         data-pos-search="true"
         tabIndex={-1}

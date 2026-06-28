@@ -96,6 +96,7 @@ export function AdminStaffPage({
       <EditUserDrawer
         user={editingUser}
         onClose={() => setEditingUser(null)}
+        sdSettings={{ enabled: false, type: 'percentage', tiers: [] }}
       />
 
       <DeactivateConfirm

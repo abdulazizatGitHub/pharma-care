@@ -396,3 +396,61 @@ export async function reactivateUser(
   revalidatePath('/superadmin/users')
   return { error: null }
 }
+
+// ─── 5.7 updateUserSpecialDiscount ───────────────────────────────────────────
+
+export async function updateUserSpecialDiscount(
+  userId:  string,
+  maxTier: number | null,
+): Promise<{ error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user) return { error: 'Not authenticated' }
+  if (role !== 'superadmin') return { error: 'Insufficient permissions' }
+
+  // Validate maxTier against configured tiers when non-null
+  if (maxTier !== null) {
+    const { data: tierSetting } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'special_discount_tiers')
+      .single()
+    const configuredTiers = (tierSetting?.value ?? '')
+      .split(',')
+      .map((s: string) => parseFloat(s.trim()))
+      .filter((n: number) => !isNaN(n) && n > 0)
+    if (!configuredTiers.includes(maxTier)) {
+      return { error: `${maxTier} is not a configured discount tier` }
+    }
+  }
+
+  // Read current value for audit delta
+  const { data: target } = await supabase
+    .from('profiles')
+    .select('special_discount_max_tier')
+    .eq('id', userId)
+    .single()
+  const previousTier = (target?.special_discount_max_tier as number | null) ?? null
+
+  const { error: updateError } = await supabase
+    .from('profiles')
+    .update({ special_discount_max_tier: maxTier })
+    .eq('id', userId)
+  if (updateError) return { error: updateError.message }
+
+  // Use SPECIAL_DISCOUNT_GRANTED when granting for the first time;
+  // USER_UPDATED for tier changes or revocations.
+  const isNewGrant = previousTier === null && maxTier !== null
+  await logAction({
+    supabase,
+    userId:    user.id,
+    userRole:  role,
+    action:    isNewGrant ? ACTION_TYPES.SPECIAL_DISCOUNT_GRANTED : ACTION_TYPES.UPDATE_USER,
+    tableName: 'profiles',
+    recordId:  userId,
+    oldValue:  { special_discount_max_tier: previousTier },
+    newValue:  { special_discount_max_tier: maxTier },
+  })
+
+  revalidatePath('/superadmin/users')
+  return { error: null }
+}

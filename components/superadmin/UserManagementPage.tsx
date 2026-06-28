@@ -12,14 +12,21 @@ import { PermissionEditor } from './PermissionEditor'
 import { DeactivateConfirm } from './DeactivateConfirm'
 import { deactivateUser, reactivateUser } from '@/app/actions/users'
 
+interface SdSettings {
+  enabled: boolean
+  type:    'percentage' | 'fixed'
+  tiers:   number[]
+}
+
 interface UserManagementPageProps {
   users:             UserRow[]
   pharmacyName:      string
   existingUsernames: string[]
+  sdSettings:        SdSettings
 }
 
 export function UserManagementPage({
-  users, pharmacyName, existingUsernames,
+  users, pharmacyName, existingUsernames, sdSettings,
 }: UserManagementPageProps) {
   const router = useRouter()
 
@@ -105,6 +112,7 @@ export function UserManagementPage({
       <EditUserDrawer
         user={editingUser}
         onClose={() => setEditingUser(null)}
+        sdSettings={sdSettings}
       />
 
       {permUser && (

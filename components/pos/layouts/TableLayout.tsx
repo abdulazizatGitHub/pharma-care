@@ -5,11 +5,13 @@ import { Plus, Trash2, CheckCircle, PauseCircle, RotateCcw, FlaskConical, ArrowR
 import { MedicineSearchInput }   from '@/components/pos/MedicineSearchInput'
 import { CartTotals }            from '@/components/pos/CartTotals'
 import { BatchPicker }           from '@/components/pos/BatchPicker'
-import { LendToPharmacyModal }   from '@/components/pos/LendToPharmacyModal'
+import { BatchItemSelector }     from '@/components/pos/BatchItemSelector'
 import { Button }                from '@/components/ui/Button'
+import { useToast }              from '@/components/ui/Toast'
 import { searchMedicinesForPOS } from '@/app/actions/sales'
 import { getBatchesForMedicine } from '@/app/actions/stock'
 import { useCart }               from '@/lib/pos-context'
+import { focusNextQtyInput, focusLastQtyInput } from '@/lib/pos-shortcuts'
 import type { BatchForDropdown } from '@/app/actions/stock'
 import type { POSMedicineResult, ParkedSale, ReturnCredit, CartItem as CartItemType } from '@/lib/pos-types'
 
@@ -25,6 +27,8 @@ interface Props {
   onHold:            () => void
   onCheckout:        () => void
   onReturns:         () => void
+  onCompareGenerics: () => void
+  onLend:            () => void
   returnCredit?:     ReturnCredit | null
 }
 
@@ -77,16 +81,23 @@ export function TableLayout({
   onHold,
   onCheckout,
   onReturns,
+  onCompareGenerics,
+  onLend,
   returnCredit,
 }: Props) {
   const { items, addItem, updateQuantity, removeItem, replaceItemBatch } = useCart()
 
   const searchRef = useRef<HTMLInputElement | null>(null)
 
+  const { toast } = useToast()
+
   const [batchPickerItem,    setBatchPickerItem]    = useState<CartItemType | null>(null)
   const [batchPickerBatches, setBatchPickerBatches] = useState<BatchForDropdown[]>([])
   const [batchPickerLoading, setBatchPickerLoading] = useState(false)
-  const [lendModalOpen,      setLendModalOpen]      = useState(false)
+  const [batchSelectorOpen,  setBatchSelectorOpen]  = useState(false)
+  const [lastRemoved,        setLastRemoved]        = useState<CartItemType | null>(null)
+  const [undoTimer,          setUndoTimer]          = useState<ReturnType<typeof setTimeout> | null>(null)
+  const [deleteSelectorOpen, setDeleteSelectorOpen] = useState(false)
 
   async function handleChangeBatch(item: CartItemType) {
     setBatchPickerLoading(true)
@@ -116,33 +127,54 @@ export function TableLayout({
     setBatchPickerBatches([])
   }
 
-  const [query,     setQuery]     = useState('')
-  const [results,   setResults]   = useState<POSMedicineResult[]>([])
-  const [searching, setSearching] = useState(false)
+  const [query,          setQuery]          = useState('')
+  const [results,        setResults]        = useState<POSMedicineResult[]>([])
+  const [searching,      setSearching]      = useState(false)
+  const [highlightedIdx, setHighlightedIdx] = useState(-1)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const runSearch = useCallback(async (q: string) => {
-    if (q.trim().length < 1) { setResults([]); return }
+    if (q.trim().length < 1) { setResults([]); setHighlightedIdx(-1); return }
     setSearching(true)
     const res = await searchMedicinesForPOS(q.trim())
     setSearching(false)
-    if (res.data) setResults(res.data)
+    if (res.data) { setResults(res.data); setHighlightedIdx(-1) }
   }, [])
 
   function handleQueryChange(q: string) {
     setQuery(q)
+    setHighlightedIdx(-1)
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => runSearch(q), 100)
   }
 
   function handleBarcodeDetected(barcode: string) {
     setQuery(barcode)
+    setHighlightedIdx(-1)
     runSearch(barcode)
   }
 
   function handleAdded() {
     setQuery('')
     setResults([])
+    setHighlightedIdx(-1)
+  }
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (flatCards.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setHighlightedIdx(prev => Math.min(prev + 1, flatCards.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setHighlightedIdx(prev => Math.max(prev - 1, -1))
+    } else if (e.key === 'Enter' && highlightedIdx >= 0) {
+      e.preventDefault()
+      const result = flatCards[highlightedIdx]
+      const batch  = result.batches[0]
+      const isOOS  = result.isOutOfStock || !batch || batch.quantity === 0
+      if (!isOOS) handleAddFromList(result)
+    }
   }
 
   function handleAddFromList(result: POSMedicineResult) {
@@ -164,11 +196,35 @@ export function TableLayout({
       isControlled:       result.schedule === 'controlled',
       isPrescription:     result.schedule === 'prescription',
     })
+    focusLastQtyInput()
     handleAdded()
   }
 
   const isSearching = query.trim().length >= 1
   const flatCards   = flattenPerBatch(isSearching ? results : [])
+
+  function doRemove(item: CartItemType) {
+    removeItem(item.id)
+    setLastRemoved(item)
+    if (undoTimer) clearTimeout(undoTimer)
+    const timer = setTimeout(() => setLastRemoved(null), 5000)
+    setUndoTimer(timer)
+    toast(`${item.medicineName} removed — press Backspace to undo`, 'info')
+  }
+
+  function doUndo() {
+    if (!lastRemoved) return
+    addItem(lastRemoved)
+    const name = lastRemoved.medicineName
+    setLastRemoved(null)
+    if (undoTimer) clearTimeout(undoTimer)
+    setUndoTimer(null)
+    toast(`${name} restored`, 'success')
+  }
+
+  useEffect(() => {
+    return () => { if (undoTimer) clearTimeout(undoTimer) }
+  }, [undoTimer])
 
   // Single keyboard handler for all table-layout shortcuts
   useEffect(() => {
@@ -189,21 +245,63 @@ export function TableLayout({
       if (e.key === 'F6') { e.preventDefault(); onReturns();  return }
       if (e.key === 'F9') { e.preventDefault(); onCheckout(); return }
       if (e.key === 'Delete') {
-        const active = document.activeElement as HTMLInputElement | null
-        const itemId = active?.dataset.qtyInput
-        if (itemId) {
-          const item = items.find(i => i.id === itemId)
-          if (item && item.quantity <= 1) {
+        const focused = document.activeElement as HTMLElement
+        const focusedItemId = focused?.getAttribute('data-qty-input')
+
+        if (focusedItemId) {
+          const input = focused as HTMLInputElement
+          const qty = parseInt(input.value, 10) || 0
+          if (qty <= 1) {
             e.preventDefault()
-            removeItem(itemId)
+            const item = items.find(i => i.id === focusedItemId)
+            if (item) {
+              doRemove(item)
+              const all = Array.from(
+                document.querySelectorAll<HTMLInputElement>('[data-qty-input]')
+              )
+              const idx = all.indexOf(input)
+              const target = all[idx - 1] ?? all[0]
+              if (target && target !== input) {
+                setTimeout(() => { target.focus(); target.select() }, 50)
+              }
+            }
           }
-          // qty > 1: browser default clears the input so user can type a new value
+          return
         }
+
+        e.preventDefault()
+        const nonBorrowed = items.filter(i => !i.isBorrowed)
+        if (nonBorrowed.length === 0) return
+        if (nonBorrowed.length === 1) {
+          doRemove(nonBorrowed[0])
+          return
+        }
+        setDeleteSelectorOpen(true)
+      }
+      if (e.key === 'Backspace') {
+        const focused = document.activeElement
+        const isInput = focused instanceof HTMLInputElement ||
+          focused instanceof HTMLTextAreaElement
+        if (isInput) return
+        if (lastRemoved) {
+          e.preventDefault()
+          doUndo()
+        }
+      }
+      if (e.key === 'b' || e.key === 'B') {
+        e.preventDefault()
+        const nonBorrowed = items.filter(i => !i.isBorrowed)
+        if (nonBorrowed.length === 0) return
+        if (nonBorrowed.length === 1) {
+          handleChangeBatch(nonBorrowed[0])
+          return
+        }
+        setBatchSelectorOpen(true)
       }
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [isSearching, items, onHold, onCheckout, onReturns, removeItem])
+  }, [isSearching, items, onHold, onCheckout, onReturns, removeItem, lastRemoved])
 
   return (
     <>
@@ -235,6 +333,7 @@ export function TableLayout({
           onChange={handleQueryChange}
           onBarcodeDetected={handleBarcodeDetected}
           inputRef={searchRef}
+          onKeyDown={handleSearchKeyDown}
         />
 
         {/* Search results — compact dropdown list */}
@@ -280,11 +379,11 @@ export function TableLayout({
                     borderBottom:  idx < flatCards.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none',
                     cursor:        isOOS ? 'default' : 'pointer',
                     opacity:       isOOS ? 0.45 : 1,
-                    background:    'white',
+                    background:    idx === highlightedIdx ? '#f0fdf4' : 'white',
                     transition:    'background 0.1s',
                   }}
                   onMouseEnter={e => { if (!isOOS) (e.currentTarget as HTMLDivElement).style.background = '#f0fdf4' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = idx === highlightedIdx ? '#f0fdf4' : 'white' }}
                 >
                   {/* Left: name + batch meta */}
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -409,6 +508,12 @@ export function TableLayout({
                         onChange={e => updateQuantity(item.id, Number(e.target.value))}
                         onBlur={e => { if (Number(e.target.value) < 1) updateQuantity(item.id, 1) }}
                         onFocus={e => e.currentTarget.select()}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            focusNextQtyInput(e.currentTarget as HTMLInputElement)
+                          }
+                        }}
                         style={{
                           width: 56, textAlign: 'center',
                           border: '1px solid #e5e7eb', borderRadius: 5,
@@ -514,8 +619,8 @@ export function TableLayout({
             <Button
               variant="secondary"
               icon={<FlaskConical size={14} />}
-              onClick={() => {}}
-              disabled
+              onClick={onCompareGenerics}
+              disabled={items.length === 0}
               tabIndex={-1}
               className="w-full"
             >
@@ -525,11 +630,12 @@ export function TableLayout({
             <Button
               variant="secondary"
               icon={<ArrowRightLeft size={14} />}
-              onClick={() => setLendModalOpen(true)}
+              onClick={onLend}
               tabIndex={-1}
               className="w-full"
             >
               Lend to Pharmacy
+              <KbdBadge label="F8" />
             </Button>
             <Button
               variant="secondary"
@@ -557,10 +663,30 @@ export function TableLayout({
         onClose={closeBatchPicker}
       />
     )}
-    <LendToPharmacyModal
-      open={lendModalOpen}
-      onClose={() => setLendModalOpen(false)}
-    />
+    {batchSelectorOpen && (
+      <BatchItemSelector
+        items={items.filter(i => !i.isBorrowed)}
+        onSelect={(item) => {
+          setBatchSelectorOpen(false)
+          handleChangeBatch(item)
+        }}
+        onClose={() => setBatchSelectorOpen(false)}
+        title="Change Batch"
+        actionLabel="Change"
+      />
+    )}
+    {deleteSelectorOpen && (
+      <BatchItemSelector
+        items={items.filter(i => !i.isBorrowed)}
+        onSelect={(item) => {
+          setDeleteSelectorOpen(false)
+          doRemove(item)
+        }}
+        onClose={() => setDeleteSelectorOpen(false)}
+        title="Remove Item"
+        actionLabel="Remove"
+      />
+    )}
     </>
   )
 }

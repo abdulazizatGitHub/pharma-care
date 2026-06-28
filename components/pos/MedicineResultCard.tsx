@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react'
 import { useCart } from '@/lib/pos-context'
+import { focusLastQtyInput } from '@/lib/pos-shortcuts'
 import { BorrowToFulfillModal } from './BorrowToFulfillModal'
 import type { POSMedicineResult, CartItem } from '@/lib/pos-types'
 
@@ -9,9 +10,10 @@ interface Props {
   result:         POSMedicineResult
   showBatchLabel: boolean   // true when same medicine has multiple batch cards in the grid
   onAdded:        () => void
+  highlighted?:   boolean
 }
 
-export function MedicineResultCard({ result, showBatchLabel, onAdded }: Props) {
+export function MedicineResultCard({ result, showBatchLabel, onAdded, highlighted }: Props) {
   const { addItem } = useCart()
 
   const batch = result.batches[0]
@@ -27,7 +29,7 @@ export function MedicineResultCard({ result, showBatchLabel, onAdded }: Props) {
     return (
       <>
         <div
-          className="bg-[#f3f4f6] rounded-md p-2 select-none border border-[rgba(0,0,0,0.08)]"
+          className={`bg-[#f3f4f6] rounded-md p-2 select-none border border-[rgba(0,0,0,0.08)]${highlighted ? ' ring-2 ring-[#166534]' : ''}`}
           style={{ opacity: 0.85 }}
         >
           <p className="text-[13px] font-bold text-[#6b7280] truncate leading-tight mb-0.5">
@@ -57,7 +59,7 @@ export function MedicineResultCard({ result, showBatchLabel, onAdded }: Props) {
           open={borrowModalOpen}
           onClose={() => setBorrowModalOpen(false)}
           medicine={{ id: result.medicineId, name: result.medicineName, salePrice: result.mrp }}
-          onAddToCart={(item) => { addItem(item); setBorrowModalOpen(false); onAdded() }}
+          onAddToCart={(item) => { addItem(item); focusLastQtyInput(); setBorrowModalOpen(false); onAdded() }}
         />
       </>
     )
@@ -104,6 +106,7 @@ export function MedicineResultCard({ result, showBatchLabel, onAdded }: Props) {
       isPrescription:     result.schedule === 'prescription',
     }
     addItem(item)
+    focusLastQtyInput()
     setConfirmFlag(false)
     onAdded()
   }
@@ -124,7 +127,7 @@ export function MedicineResultCard({ result, showBatchLabel, onAdded }: Props) {
         confirmFlag
           ? 'bg-amber-50'
           : 'hover:bg-[#f0fdf7] hover:border-[#5DCAA5]'
-      }`}
+      }${highlighted ? ' ring-2 ring-[#166534] bg-[#f0fdf4]' : ''}`}
       onClick={handleCardClick}
       role="button"
       tabIndex={-1}

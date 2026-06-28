@@ -4,27 +4,30 @@ import React from 'react'
 import type { CartItem } from '@/lib/pos-types'
 
 export interface ReceiptContentProps {
-  pharmacyName:      string
-  pharmacyAddress:   string        // shown below header note; hidden if empty
-  headerNote:        string        // tagline below pharmacy name; hidden if empty
-  cashierName:       string
-  showCashierName:   boolean       // setting: show cashier name on receipt
-  customerName:      string | null // shown if present
-  receiptNo:         string | null // shown based on showReceiptNo; null before sale completes
-  showReceiptNo:     boolean       // setting: show receipt number on receipt
-  saleTime:          Date
-  items:             CartItem[]
-  subtotal:          number        // sum of item totalPrices (after per-item discounts)
-  discountAmount:    number        // sale-level overall discount (cashier override)
-  serviceFee:        number        // from settings (DB column: bag_charge)
-  serviceFeeLabel:   string        // e.g. "Service Fee", "Handling Fee"
-  serviceFeeEnabled: boolean       // whether to show the fee row
-  total:             number
-  paymentType:       'cash' | 'credit'
-  amountPaid:        number
-  change:            number
-  returnPolicy:      string        // return/exchange policy; hidden if empty
-  receiptFooter:     string
+  pharmacyName:        string
+  pharmacyAddress:     string        // shown below header note; hidden if empty
+  headerNote:          string        // tagline below pharmacy name; hidden if empty
+  cashierName:         string
+  showCashierName:     boolean       // setting: show cashier name on receipt
+  customerName:        string | null // shown if present
+  receiptNo:           string | null // shown based on showReceiptNo; null before sale completes
+  showReceiptNo:       boolean       // setting: show receipt number on receipt
+  saleTime:            Date
+  items:               CartItem[]
+  subtotal:            number        // sum of item totalPrices (after per-item discounts)
+  discountAmount:      number        // sale-level overall discount (cashier override)
+  serviceFee:          number        // from settings (DB column: bag_charge)
+  serviceFeeLabel:     string        // e.g. "Service Fee", "Handling Fee"
+  serviceFeeEnabled:   boolean       // whether to show the fee row
+  total:               number
+  paymentType:         'cash' | 'credit'
+  amountPaid:          number
+  change:              number
+  returnPolicy:        string        // return/exchange policy; hidden if empty
+  receiptFooter:       string
+  specialDiscountAmt?:  number
+  specialDiscountType?: 'percentage' | 'fixed'
+  selectedTier?:        number | null
 }
 
 function HDivider({ double }: { double?: boolean }) {
@@ -77,6 +80,9 @@ export function ReceiptContent({
   change,
   returnPolicy,
   receiptFooter,
+  specialDiscountAmt  = 0,
+  specialDiscountType = 'percentage',
+  selectedTier        = null,
 }: ReceiptContentProps) {
   const dateStr = saleTime.toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',
@@ -139,13 +145,13 @@ export function ReceiptContent({
               <div key={item.id} className="flex">
                 <span className="flex-1 pr-1 font-medium text-[#111827] wrap-break-word">{item.medicineName}</span>
                 <span className="w-7 text-right shrink-0">{item.quantity}</span>
-                <span className="w-14 text-right shrink-0">Rs {fmt(item.mrp)}</span>
+                <span className="w-14 text-right shrink-0">{fmt(item.mrp)}</span>
                 {hasAnyDiscount && (
                   <span className="w-12 text-right shrink-0 text-[#0F6E56]">
-                    {itemDiscAmt > 0 ? `Rs ${fmt(itemDiscAmt)}` : '—'}
+                    {itemDiscAmt > 0 ? fmt(itemDiscAmt) : '—'}
                   </span>
                 )}
-                <span className="w-16 text-right shrink-0">Rs {fmt(item.totalPrice)}</span>
+                <span className="w-16 text-right shrink-0">{fmt(item.totalPrice)}</span>
               </div>
             )
           })
@@ -156,17 +162,29 @@ export function ReceiptContent({
       {/* Totals breakdown */}
       <div className="space-y-0.5 my-1.5">
         {hasAnyDiscount && (
-          <TotalRow label="Gross Value (at MRP):" value={`Rs ${fmt(grossAtMRP)}`}      muted />
+          <TotalRow label="Gross Value (at MRP):" value={fmt(grossAtMRP)}              muted />
         )}
         {hasAnyDiscount && (
-          <TotalRow label="Patient Discount:"      value={`-Rs ${fmt(patientDiscount)}`} green />
+          <TotalRow label="Patient Discount:"      value={`-${fmt(patientDiscount)}`}  green />
         )}
-        <TotalRow label="Net Value:" value={`Rs ${fmt(netValue)}`} />
+        <TotalRow label="Net Value:" value={fmt(netValue)} />
         {discountAmount > 0 && (
-          <TotalRow label="Sale Discount:" value={`-Rs ${fmt(discountAmount)}`} green />
+          <TotalRow label="Sale Discount:" value={`-${fmt(discountAmount)}`} green />
         )}
         {serviceFeeEnabled && serviceFee > 0 && (
-          <TotalRow label={`${serviceFeeLabel}:`} value={`Rs ${fmt(serviceFee)}`} muted />
+          <TotalRow label={`${serviceFeeLabel}:`} value={fmt(serviceFee)} muted />
+        )}
+        {(specialDiscountAmt ?? 0) > 0 && (
+          <div className="flex justify-between text-[11px]" style={{ color: '#0F6E56' }}>
+            <span>
+              Special Discount
+              {specialDiscountType === 'percentage' && selectedTier
+                ? ` (${selectedTier}%)`
+                : ''}
+            </span>
+            <span>−{(specialDiscountAmt ?? 0).toLocaleString('en-PK',
+              { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          </div>
         )}
       </div>
       <HDivider double />
@@ -180,13 +198,16 @@ export function ReceiptContent({
       {/* Payment */}
       {paymentType === 'cash' && amountPaid > 0 && (
         <div className="space-y-0.5">
-          <TotalRow label="Cash Received:" value={`Rs ${fmt(amountPaid)}`} />
-          <TotalRow label="Change:"        value={`Rs ${fmt(change)}`} />
+          <TotalRow label="Cash Received:" value={fmt(amountPaid)} />
+          <TotalRow label="Change:"        value={fmt(change)} />
         </div>
       )}
       {paymentType === 'credit' && (
         <TotalRow label="Payment:" value="Credit (Udhaar)" />
       )}
+      <p style={{ fontSize: 9, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>
+        All amounts in PKR
+      </p>
       <HDivider double />
 
       {/* Footer */}

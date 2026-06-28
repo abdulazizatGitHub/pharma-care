@@ -14,6 +14,7 @@ export interface UserRow {
   joined_at: string | null
   grants: string[]
   restrictions: string[]
+  special_discount_max_tier: number | null
 }
 
 type Tab = 'admins' | 'pharmacists' | 'inactive'

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { Building2, Receipt, Banknote, ClipboardList, Lock, RotateCcw, LucideIcon } from 'lucide-react'
-import { updateSettings } from '@/app/actions/settings'
+import { updateSettings, updateSpecialDiscountSettings } from '@/app/actions/settings'
 import { Button } from '@/components/ui/Button'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -286,6 +286,63 @@ export function SettingsPage({ settings }: Props) {
 
   const feeEnabled = pos.values['service_fee_enabled'] === 'true'
   const pharmacyName = settings['pharmacy_name'] ?? 'PharmaCare'
+
+  // ── Special discount local state ───────────────────────────────────────────
+  // Kept separate from pos useSection because tiers require number[], not string.
+
+  const [sdEnabled,  setSdEnabled]  = useState(settings['special_discount_enabled'] === 'true')
+  const [sdType,     setSdType]     = useState<'percentage' | 'fixed'>(
+    settings['special_discount_type'] === 'fixed' ? 'fixed' : 'percentage'
+  )
+  const [sdTiers,    setSdTiers]    = useState<number[]>(() => {
+    const raw = settings['special_discount_tiers'] ?? ''
+    return raw.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n) && n > 0)
+  })
+  const [sdInput,    setSdInput]    = useState('')
+  const [sdInputErr, setSdInputErr] = useState<string | null>(null)
+  const [sdLoading,  setSdLoading]  = useState(false)
+  const [sdSaved,    setSdSaved]    = useState(false)
+  const [sdError,    setSdError]    = useState<string | null>(null)
+
+  function sdAddTier() {
+    const raw = sdInput.trim()
+    const val = parseFloat(raw)
+    if (!raw || isNaN(val)) { setSdInputErr('Enter a valid number'); return }
+    if (sdType === 'percentage') {
+      if (!Number.isInteger(val) || val < 1 || val > 100) {
+        setSdInputErr('Must be a whole number from 1–100'); return
+      }
+    } else {
+      if (val <= 0) { setSdInputErr('Must be greater than 0'); return }
+    }
+    if (sdTiers.includes(val))   { setSdInputErr('Tier already exists'); return }
+    if (sdTiers.length >= 6)     { setSdInputErr('Maximum 6 tiers allowed'); return }
+    setSdTiers(prev => [...prev, val].sort((a, b) => a - b))
+    setSdInput('')
+    setSdInputErr(null)
+  }
+
+  function sdRemoveTier(val: number) {
+    setSdTiers(prev => prev.filter(t => t !== val))
+  }
+
+  function sdHandleTypeChange(newType: 'percentage' | 'fixed') {
+    if (sdTiers.length > 0) {
+      if (!window.confirm('Changing type will clear existing tiers. Continue?')) return
+      setSdTiers([])
+      setSdInputErr(null)
+    }
+    setSdType(newType)
+  }
+
+  async function sdSave() {
+    setSdLoading(true); setSdError(null); setSdSaved(false)
+    const result = await updateSpecialDiscountSettings(sdEnabled, sdType, sdTiers)
+    setSdLoading(false)
+    if (result.error) { setSdError(result.error); return }
+    setSdSaved(true)
+    setTimeout(() => setSdSaved(false), 3000)
+  }
 
   return (
     <div
@@ -583,6 +640,142 @@ export function SettingsPage({ settings }: Props) {
                 <span style={{ fontSize: 12, color: '#6b7280' }}>%</span>
               </div>
             </Field>
+
+            <RowDivider />
+
+            {/* ── Special Discount subsection ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{
+                fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: '0.06em', color: '#9ca3af', margin: 0,
+              }}>
+                Special Discount
+              </p>
+
+              <ToggleRow
+                label="Enable special discount"
+                description={
+                  sdEnabled
+                    ? 'Pharmacists with permission can apply a special discount at checkout.'
+                    : 'Enable to configure discount tiers and grant access to pharmacists.'
+                }
+                checked={sdEnabled}
+                onChange={setSdEnabled}
+              />
+
+              {sdEnabled && (
+                <>
+                  {/* Type radio */}
+                  <Field label="Discount type">
+                    <div style={{ display: 'flex', gap: 20, marginTop: 4 }}>
+                      {(['percentage', 'fixed'] as const).map(t => (
+                        <label
+                          key={t}
+                          style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: '#374151' }}
+                        >
+                          <input
+                            type="radio"
+                            name="sd_type"
+                            value={t}
+                            checked={sdType === t}
+                            onChange={() => sdHandleTypeChange(t)}
+                            style={{ accentColor: '#0F6E56' }}
+                          />
+                          {t === 'percentage' ? 'Percentage (%)' : 'Fixed Amount (Rs)'}
+                        </label>
+                      ))}
+                    </div>
+                  </Field>
+
+                  {/* Tier chip input */}
+                  <Field
+                    label="Discount tiers"
+                    hint={`${sdTiers.length} / 6 tiers configured. Press Enter or click + Add.`}
+                  >
+                    {/* Existing tier chips */}
+                    {sdTiers.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                        {sdTiers.map(tier => (
+                          <span
+                            key={tier}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              padding: '2px 6px 2px 10px',
+                              borderRadius: 12,
+                              background: '#E6F1FB', border: '1px solid #B3D0F0',
+                              fontSize: 11, fontWeight: 600, color: '#185FA5',
+                            }}
+                          >
+                            {sdType === 'percentage' ? `${tier}%` : `Rs ${tier}`}
+                            <button
+                              type="button"
+                              onClick={() => sdRemoveTier(tier)}
+                              aria-label={`Remove tier ${tier}`}
+                              style={{
+                                width: 14, height: 14,
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                borderRadius: 7, border: 'none',
+                                background: '#185FA5', color: '#fff',
+                                fontSize: 9, cursor: 'pointer', lineHeight: 1, padding: 0,
+                              }}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Add row */}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        type="number"
+                        min="0"
+                        step={sdType === 'percentage' ? '1' : '0.01'}
+                        value={sdInput}
+                        onChange={e => { setSdInput(e.target.value); setSdInputErr(null) }}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); sdAddTier() } }}
+                        placeholder={sdType === 'percentage' ? 'e.g. 5' : 'e.g. 50'}
+                        style={{ width: 120 }}
+                        className={INPUT}
+                      />
+                      <button
+                        type="button"
+                        onClick={sdAddTier}
+                        style={{
+                          height: 32, padding: '0 12px',
+                          borderRadius: 6,
+                          border: '1px solid #0F6E56',
+                          background: '#0F6E56', color: '#fff',
+                          fontSize: 12, fontWeight: 500,
+                          cursor: 'pointer', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        + Add
+                      </button>
+                    </div>
+
+                    {sdInputErr && (
+                      <p style={{ fontSize: 11, color: '#A32D2D', marginTop: 4 }}>{sdInputErr}</p>
+                    )}
+                  </Field>
+
+                  <p style={{ fontSize: 11, color: '#9ca3af', marginTop: -4 }}>
+                    Pharmacists are granted access up to a maximum tier in{' '}
+                    <strong style={{ color: '#6b7280' }}>User Management → Edit Pharmacist</strong>.
+                  </p>
+                </>
+              )}
+
+              {/* Special discount save row */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+                {sdSaved && <span style={{ fontSize: 11, color: '#0F6E56', fontWeight: 500 }}>✓ Saved</span>}
+                {sdError && <span style={{ fontSize: 11, color: '#A32D2D' }}>⚠ {sdError}</span>}
+                <Button size="sm" onClick={sdSave} loading={sdLoading}>
+                  Save special discount
+                </Button>
+              </div>
+            </div>
           </SectionPanel>
         )}
 

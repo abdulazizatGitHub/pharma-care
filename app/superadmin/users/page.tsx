@@ -5,10 +5,10 @@ import type { UserRow } from '@/components/superadmin/UserTable'
 export default async function SuperadminUsersPage() {
   const supabase = await createClient()
 
-  const [{ data: profiles }, { data: permissions }, { data: setting }] = await Promise.all([
+  const [{ data: profiles }, { data: permissions }, { data: settingsRows }] = await Promise.all([
     supabase
       .from('profiles')
-      .select('id, full_name, email, role, is_active, username, phone, joined_at')
+      .select('id, full_name, email, role, is_active, username, phone, joined_at, special_discount_max_tier')
       .in('role', ['admin', 'pharmacist'])
       .order('created_at', { ascending: true }),
     supabase
@@ -16,9 +16,8 @@ export default async function SuperadminUsersPage() {
       .select('user_id, permission, type'),
     supabase
       .from('settings')
-      .select('value')
-      .eq('key', 'pharmacy_name')
-      .single(),
+      .select('key, value')
+      .in('key', ['pharmacy_name', 'special_discount_enabled', 'special_discount_type', 'special_discount_tiers']),
   ])
 
   const permsByUser = (permissions ?? []).reduce<
@@ -31,18 +30,29 @@ export default async function SuperadminUsersPage() {
   }, {})
 
   const users: UserRow[] = (profiles ?? []).map(p => ({
-    id:           p.id,
-    full_name:    p.full_name ?? '',
-    username:     p.username,
-    phone:        p.phone,
-    role:         p.role as 'admin' | 'pharmacist',
-    is_active:    p.is_active,
-    joined_at:    p.joined_at,
-    grants:       permsByUser[p.id]?.grants       ?? [],
-    restrictions: permsByUser[p.id]?.restrictions ?? [],
+    id:                        p.id,
+    full_name:                 p.full_name ?? '',
+    username:                  p.username,
+    phone:                     p.phone,
+    role:                      p.role as 'admin' | 'pharmacist',
+    is_active:                 p.is_active,
+    joined_at:                 p.joined_at,
+    grants:                    permsByUser[p.id]?.grants       ?? [],
+    restrictions:              permsByUser[p.id]?.restrictions ?? [],
+    special_discount_max_tier: (p.special_discount_max_tier as number | null) ?? null,
   }))
 
-  const pharmacyName = setting?.value ?? 'pharmacare'
+  const settingsMap = (settingsRows ?? []).reduce<Record<string, string>>((acc, r) => {
+    acc[r.key] = r.value
+    return acc
+  }, {})
+
+  const pharmacyName = settingsMap['pharmacy_name'] ?? 'PharmaCare'
+  const sdSettings = {
+    enabled: settingsMap['special_discount_enabled'] === 'true',
+    type:    (settingsMap['special_discount_type'] === 'fixed' ? 'fixed' : 'percentage') as 'percentage' | 'fixed',
+    tiers:   (settingsMap['special_discount_tiers'] ?? '').split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n) && n > 0),
+  }
 
   // TODO: At scale, replace with a server-side uniqueness check API call instead of passing
   // all usernames to the client. Acceptable for single-branch MVP with <100 users.
@@ -55,6 +65,7 @@ export default async function SuperadminUsersPage() {
       users={users}
       pharmacyName={pharmacyName}
       existingUsernames={existingUsernames}
+      sdSettings={sdSettings}
     />
   )
 }

@@ -5,15 +5,57 @@ import { useRouter } from 'next/navigation'
 import { X, Copy, Check } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
-import { updateUser, resetPassword } from '@/app/actions/users'
+import { updateUser, resetPassword, updateUserSpecialDiscount } from '@/app/actions/users'
 import type { UserRow } from './UserTable'
 
-interface EditUserDrawerProps {
-  user:    UserRow | null
-  onClose: () => void
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface SdSettings {
+  enabled: boolean
+  type:    'percentage' | 'fixed'
+  tiers:   number[]
 }
 
-export function EditUserDrawer({ user, onClose }: EditUserDrawerProps) {
+interface EditUserDrawerProps {
+  user:       UserRow | null
+  onClose:    () => void
+  sdSettings: SdSettings
+}
+
+// ─── Local toggle ─────────────────────────────────────────────────────────────
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      style={{
+        width: 36, height: 20, borderRadius: 10,
+        background: checked ? '#0F6E56' : '#d1d5db',
+        border: 'none', cursor: 'pointer',
+        position: 'relative', transition: 'background 0.2s',
+        flexShrink: 0, outline: 'none',
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute', top: 2,
+          left: checked ? 18 : 2,
+          width: 16, height: 16, borderRadius: 8,
+          background: '#fff',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.18)',
+          transition: 'left 0.2s',
+        }}
+      />
+    </button>
+  )
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function EditUserDrawer({ user, onClose, sdSettings }: EditUserDrawerProps) {
   const router = useRouter()
 
   const [firstName, setFirstName] = useState('')
@@ -23,6 +65,10 @@ export function EditUserDrawer({ user, onClose }: EditUserDrawerProps) {
   const [error,     setError]     = useState<string | null>(null)
   const [newPw,     setNewPw]     = useState<string | null>(null)
   const [copied,    setCopied]    = useState(false)
+
+  // Special discount state
+  const [sdGranted,  setSdGranted]  = useState(false)
+  const [sdMaxTier,  setSdMaxTier]  = useState<number | null>(null)
 
   const [isPending,   startSave]  = useTransition()
   const [isResetting, startReset] = useTransition()
@@ -38,12 +84,24 @@ export function EditUserDrawer({ user, onClose }: EditUserDrawerProps) {
     setError(null)
     setNewPw(null)
     setCopied(false)
-  }, [user?.id])
+
+    // Sync special discount state from profile
+    const hasTier = user.special_discount_max_tier !== null
+    setSdGranted(hasTier)
+    setSdMaxTier(hasTier ? user.special_discount_max_tier : (sdSettings.tiers[0] ?? null))
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Whether the SD section should be shown
+  const showSdSection =
+    user?.role === 'pharmacist' &&
+    sdSettings.enabled &&
+    sdSettings.tiers.length > 0
 
   function handleSave() {
     if (!user) return
     setError(null)
     startSave(async () => {
+      // 1. Update core profile fields
       const result = await updateUser(user.id, {
         firstName,
         lastName,
@@ -51,6 +109,14 @@ export function EditUserDrawer({ user, onClose }: EditUserDrawerProps) {
         cnic: cnic || undefined,
       })
       if (result.error) { setError(result.error); return }
+
+      // 2. Update special discount grant (only when section is visible)
+      if (showSdSection) {
+        const tierToSave = sdGranted ? (sdMaxTier ?? null) : null
+        const sdResult   = await updateUserSpecialDiscount(user.id, tierToSave)
+        if (sdResult.error) { setError(sdResult.error); return }
+      }
+
       router.refresh()
       onClose()
     })
@@ -144,6 +210,60 @@ export function EditUserDrawer({ user, onClose }: EditUserDrawerProps) {
                 <p className="text-[11px] text-[#A32D2D] bg-rose-50 border border-rose-200 rounded px-3 py-2">
                   {error}
                 </p>
+              )}
+
+              {/* ── Special Discount Permission ── */}
+              {showSdSection && (
+                <div className="pt-2 border-t border-[rgba(0,0,0,0.08)] space-y-3">
+                  <p className="text-[11px] font-medium text-[#6b7280]">Special Discount Permission</p>
+
+                  {/* Grant toggle row */}
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-[12px] font-medium text-[#111827]">
+                        Allow special discount at checkout
+                      </p>
+                      <p className="text-[11px] text-[#9ca3af] mt-0.5">
+                        For personal or family customers
+                      </p>
+                    </div>
+                    <Toggle
+                      checked={sdGranted}
+                      onChange={v => {
+                        setSdGranted(v)
+                        if (v && sdMaxTier === null) {
+                          setSdMaxTier(sdSettings.tiers[0] ?? null)
+                        }
+                      }}
+                    />
+                  </div>
+
+                  {/* Max tier dropdown — only when granted */}
+                  {sdGranted && (
+                    <div>
+                      <label
+                        className="block text-[10px] font-medium uppercase tracking-[0.04em] text-[#6b7280] mb-1"
+                      >
+                        Maximum discount tier
+                      </label>
+                      <select
+                        value={sdMaxTier ?? ''}
+                        onChange={e => setSdMaxTier(parseFloat(e.target.value))}
+                        className="w-full h-8 px-2.5 rounded-md border border-[rgba(0,0,0,0.15)] text-[12px] text-[#111827] bg-white focus:outline-none focus:ring-2 focus:ring-[#0F6E56]"
+                        style={{ cursor: 'pointer' }}
+                      >
+                        {sdSettings.tiers.map(t => (
+                          <option key={t} value={t}>
+                            {sdSettings.type === 'percentage' ? `${t}%` : `Rs ${t}`}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-[#9ca3af] mt-1">
+                        Pharmacist sees all tiers up to and including this value at checkout.
+                      </p>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Password reset section */}

@@ -14,7 +14,7 @@ export default async function PharmacistPosPage() {
   if (!user) redirect('/login')
 
   const [{ data: profile }, { data: overrides }] = await Promise.all([
-    supabase.from('profiles').select('role, full_name').eq('id', user.id).single(),
+    supabase.from('profiles').select('role, full_name, special_discount_max_tier').eq('id', user.id).single(),
     supabase.from('user_permissions').select('permission, type').eq('user_id', user.id),
   ])
 
@@ -43,6 +43,9 @@ export default async function PharmacistPosPage() {
         'receipt_return_policy',
         'receipt_show_cashier',
         'receipt_show_receipt_no',
+        'special_discount_enabled',
+        'special_discount_type',
+        'special_discount_tiers',
       ]),
     getHeldSales(user.id),
     getTopMedicines(),
@@ -53,6 +56,14 @@ export default async function PharmacistPosPage() {
   for (const row of (settingsRows ?? [])) {
     settings[row.key] = row.value
   }
+
+  const specialDiscountTiers = (settings['special_discount_tiers'] ?? '')
+    .split(',')
+    .map(s => parseFloat(s.trim()))
+    .filter(n => !isNaN(n) && n > 0)
+
+  const rawMaxTier = (profile as { role: string; full_name?: string | null; special_discount_max_tier?: number | null }).special_discount_max_tier
+  const specialDiscountMaxTier = rawMaxTier !== undefined && rawMaxTier !== null ? Number(rawMaxTier) : null
 
   return (
     <POSPage
@@ -72,6 +83,10 @@ export default async function PharmacistPosPage() {
       initialParkedSales={(heldResult.data ?? []) as ParkedSale[]}
       initialMedicines={(topMedsResult.data ?? []) as POSMedicineResult[]}
       currentShift={shiftResult.data ?? null}
+      specialDiscountEnabled={settings['special_discount_enabled'] === 'true'}
+      specialDiscountType={settings['special_discount_type'] === 'fixed' ? 'fixed' : 'percentage'}
+      specialDiscountTiers={specialDiscountTiers}
+      specialDiscountMaxTier={specialDiscountMaxTier}
     />
   )
 }

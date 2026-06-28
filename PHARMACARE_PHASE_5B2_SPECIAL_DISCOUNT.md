@@ -1,434 +1,255 @@
-# PharmaCare — Phase 5B-4: Generic Alternatives Comparison Wizard
+# PharmaCare — Phase 5B-2: Special Discount Permission System
 
 ## Overview
 
-A full-screen comparison wizard accessible via F3 at POS or via
-a standalone search. Shows alternative generic brands for medicines
-in the cart (or searched). Supports manual per-row selection,
-full-column selection, and automatic lowest-price selection.
-On apply, updates the cart with the selected medicines.
+Superadmin defines discount tiers and grants per-pharmacist access
+up to a maximum tier. At checkout, eligible pharmacists see a
+dropdown to apply a special discount to the total sale. Recorded
+on the sale with an audit trail.
+
+No changes to complete_sale() RPC parameter list — p_discount_amt
+already exists and will carry the computed discount amount.
 
 ---
 
-## Part 1 — Database Migration 030
+## Part 1 — Database Migration 029
 
-### New DB function: get_generic_alternatives
+### 1.1 New settings keys
+
+Add to the settings table (upsert on key):
 
 ```sql
-CREATE OR REPLACE FUNCTION get_generic_alternatives(
-  p_medicine_ids UUID[]
-)
-RETURNS TABLE (
-  generic_name_id   UUID,
-  generic_name      TEXT,
-  original_med_id   UUID,
-  medicine_id       UUID,
-  medicine_name     TEXT,
-  manufacturer      TEXT,
-  is_original       BOOLEAN,
-  batch_id          UUID,
-  batch_no          TEXT,
-  expiry_date       DATE,
-  available_qty     INTEGER,
-  purchase_price    NUMERIC,
-  sale_price        NUMERIC,
-  mrp               NUMERIC,
-  discount_pct      NUMERIC,
-  option_index      INTEGER
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  RETURN QUERY
-  WITH input_medicines AS (
-    SELECT
-      m.id AS medicine_id,
-      m.generic_name_id,
-      gn.name AS generic_name
-    FROM medicines m
-    JOIN generic_names gn ON gn.id = m.generic_name_id
-    WHERE m.id = ANY(p_medicine_ids)
-      AND m.is_deleted = false
-      AND m.generic_name_id IS NOT NULL
-  ),
-  all_alternatives AS (
-    SELECT
-      im.generic_name_id,
-      im.generic_name,
-      im.medicine_id AS original_med_id,
-      m2.id AS alt_med_id,
-      m2.name AS alt_med_name,
-      m2.manufacturer,
-      (m2.id = im.medicine_id) AS is_original,
-      sb.id AS batch_id,
-      sb.batch_no,
-      sb.expiry_date,
-      sb.quantity AS available_qty,
-      sb.purchase_price,
-      sb.sale_price,
-      sb.mrp,
-      CASE
-        WHEN sb.mrp > 0 AND sb.sale_price IS NOT NULL
-        THEN ROUND(((sb.mrp - sb.sale_price) / sb.mrp) * 100, 1)
-        ELSE 0
-      END AS discount_pct,
-      ROW_NUMBER() OVER (
-        PARTITION BY im.generic_name_id, m2.id
-        ORDER BY sb.expiry_date ASC NULLS LAST
-      ) AS batch_rank
-    FROM input_medicines im
-    JOIN medicines m2
-      ON  m2.generic_name_id = im.generic_name_id
-      AND m2.is_deleted = false
-      AND m2.is_active = true
-    JOIN stock_batches sb
-      ON  sb.medicine_id = m2.id
-      AND sb.is_deleted = false
-      AND sb.quantity > 0
-      AND sb.sale_price IS NOT NULL
-      AND sb.mrp IS NOT NULL
-  ),
-  best_batch_per_medicine AS (
-    SELECT * FROM all_alternatives WHERE batch_rank = 1
-  ),
-  ranked_options AS (
-    SELECT
-      *,
-      ROW_NUMBER() OVER (
-        PARTITION BY generic_name_id
-        ORDER BY is_original DESC, sale_price ASC
-      ) AS option_index
-    FROM best_batch_per_medicine
-  )
-  SELECT
-    generic_name_id,
-    generic_name,
-    original_med_id,
-    alt_med_id         AS medicine_id,
-    alt_med_name       AS medicine_name,
-    manufacturer,
-    is_original,
-    batch_id,
-    batch_no,
-    expiry_date,
-    available_qty,
-    purchase_price,
-    sale_price,
-    mrp,
-    discount_pct,
-    option_index::INTEGER
-  FROM ranked_options
-  ORDER BY generic_name_id, is_original DESC, sale_price ASC;
-END;
-$$;
-
-REVOKE ALL    ON FUNCTION get_generic_alternatives(UUID[]) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION get_generic_alternatives(UUID[]) TO authenticated;
+-- Discount type: 'percentage' or 'fixed'
+INSERT INTO settings (key, value) VALUES
+  ('special_discount_type', 'percentage'),
+  ('special_discount_tiers', '5,10,15'),
+  ('special_discount_enabled', 'false')
+ON CONFLICT (key) DO NOTHING;
 ```
 
-### Function behaviour
+`special_discount_tiers`: comma-separated list of values.
+  If type=percentage: values are percentages (5 = 5%)
+  If type=fixed: values are rupee amounts (50 = Rs 50)
 
-- Only returns medicines that have stock with sale_price AND mrp set
-- Best batch per medicine = FEFO (nearest expiry first)
-- option_index: 1 = original (always first), 2,3,4 = alternatives
-  sorted by sale_price ASC (cheapest first)
-- Medicines in p_medicine_ids without a generic_name_id are excluded
-  (wizard handles this by marking them as "no generic available")
-- Returns one row per medicine per generic group
+### 1.2 New column on profiles
+
+```sql
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS special_discount_max_tier
+    NUMERIC(10,2) DEFAULT NULL;
+```
+
+NULL means no special discount permission granted.
+A value (e.g. 10.00) means pharmacist can apply up to that tier.
+
+### 1.3 New columns on sales
+
+```sql
+ALTER TABLE sales
+  ADD COLUMN IF NOT EXISTS special_discount_applied
+    BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS special_discount_type
+    TEXT DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS special_discount_value
+    NUMERIC(10,2) DEFAULT NULL;
+```
+
+`special_discount_type`: 'percentage' or 'fixed' — recorded at
+  time of sale (settings may change later)
+`special_discount_value`: the tier chosen (e.g. 10 for 10%)
+`special_discount_applied`: flag for reporting
 
 ---
 
-## Part 2 — Server Action
+## Part 2 — Settings UI
 
-### getGenericAlternatives in app/actions/pos.ts
+### 2.1 New section in /superadmin/settings
 
-```typescript
-export interface GenericAlternative {
-  genericNameId:  string
-  genericName:    string
-  originalMedId:  string
-  medicineId:     string
-  medicineName:   string
-  manufacturer:   string | null
-  isOriginal:     boolean
-  batchId:        string
-  batchNo:        string
-  expiryDate:     string | null
-  availableQty:   number
-  purchasePrice:  number | null
-  salePrice:      number
-  mrp:            number
-  discountPct:    number
-  optionIndex:    number
-}
+Section title: "Special Discount"
+Subsection of: POS & Fees (add below service fee section)
 
-export async function getGenericAlternatives(
-  medicineIds: string[]
-): Promise<{ data: GenericAlternative[] | null; error: string | null }>
-```
+Controls:
+1. Enable Special Discount toggle
+   key: special_discount_enabled, value: 'true'/'false'
 
-Calls: `supabase.rpc('get_generic_alternatives', {
-  p_medicine_ids: medicineIds
-})`
+2. Discount Type radio buttons
+   key: special_discount_type
+   Options: "Percentage (%)" | "Fixed Amount (Rs)"
 
-Role: pharmacist, admin, superadmin.
+3. Discount Tiers input
+   key: special_discount_tiers
+   UI: tag/chip input — user types a value and presses Enter
+   to add a tier chip. Each chip has an X to remove.
+   Stored as comma-separated string: "5,10,15"
+   Validation:
+     percentage: each value 1–100
+     fixed: each value > 0
+   Display: "5%" or "Rs 50" depending on type
+   Max 6 tiers.
+
+4. Read-only note below tiers:
+   "Pharmacists are granted access up to a maximum tier in
+   User Management → Edit Pharmacist."
+
+### 2.2 Server action: updateSpecialDiscountSettings
+
+In app/actions/settings.ts (or equivalent):
+  Updates all three settings keys atomically.
+  Superadmin only.
+  Validates tier values against type.
+  logAction(ACTION_TYPES.SETTINGS_UPDATED)
 
 ---
 
-## Part 3 — Wizard UI
+## Part 3 — User Management UI
 
-### 3.1 Trigger points
+### 3.1 Special discount grant per pharmacist
 
-1. **F3 key** when POS is active:
-   - If cart has items: opens wizard with cart medicine IDs
-   - If cart is empty: opens wizard in search mode
+In the pharmacist edit form (admin/superadmin user management):
 
-2. **[Generics] button** in action buttons (all 3 layouts):
-   Same behaviour as F3.
+Add a new section: "Special Discount Permission"
 
-3. **Standalone search mode**:
-   If cart is empty or user wants to compare without adding to
-   cart first, wizard shows a search bar to find a medicine,
-   then shows its alternatives. In this mode, selecting an
-   option adds it to the cart.
+Show only when:
+  - The edited user has role = 'pharmacist'
+  - special_discount_enabled = 'true' in settings
 
-### 3.2 Wizard layout
+Controls:
+  Toggle: "Grant special discount permission"
+    When off: special_discount_max_tier = NULL
+    When on: shows tier selector below
 
-Full-screen overlay (fixed, z-index 1100, above BatchPicker).
+  Tier selector (shown when toggle is on):
+    Label: "Maximum allowed tier"
+    Dropdown: shows all configured tiers from
+      special_discount_tiers setting
+    Selected value → special_discount_max_tier on profiles
 
-```
-┌────────────────────────────────────────────────────────────────────┐
-│  Generic Alternatives Comparison                          [Esc ✕]  │
-│  Compare generic options and select the best for your patient      │
-├────────────────────────────────────────────────────────────────────┤
-│  [Search medicine to add...]  ← only shown in search/empty mode   │
-├──────────────────────┬──────────────────┬──────────────────────────┤
-│                      │   ORIGINAL       │  OPTION 1  │  OPTION 2  │
-│  ITEM                │   Panadol 500mg  │  Paracet.. │  Calpol    │
-│                      │   (GSK)          │  (OBS)     │  (Pfizer)  │
-├──────────────────────┼──────────────────┼────────────┼────────────┤
-│  Paracetamol 500mg   │                  │            │            │
-│  (generic group)     │                  │            │            │
-│  ─ Panadol 500mg     │  ✓ In cart       │            │            │
-│    Sale: Rs 18.50    │  Rs 18.50        │  Rs 14.00  │  Rs 15.00  │
-│    MRP:  Rs 20.00    │  MRP Rs 20.00    │  MRP 16.00 │  MRP 17.00 │
-│    Disc: 7.5%        │  Disc: 7.5%      │  Disc:12.5%│  Disc:11.8%│
-│    Stock: 121        │  Stock: 121      │  Stock: 50 │  Stock: 50 │
-│                      │  [○ Selected]    │  [○ Select]│  [○ Select]│
-├──────────────────────┼──────────────────┼────────────┼────────────┤
-│  Brufen 400mg        │                  │            │            │
-│  ── No generic ──    │  Rs 45.00        │     ░░░░░░ │     ░░░░░░ │
-│  (no generic linked) │  In cart         │  (no alt.) │  (no alt.) │
-├──────────────────────┴──────────────────┴────────────┴────────────┤
-│  SUMMARY             │   ORIGINAL       │  OPTION 1  │  OPTION 2  │
-│  Gross (MRP):        │   Rs 70.00       │  Rs 67.00  │  Rs 69.00  │
-│  Patient Discount:   │  -Rs  1.50       │ -Rs  2.00  │ -Rs  2.00  │
-│  Net Total:          │   Rs 68.50       │  Rs 65.00  │  Rs 67.00  │
-├──────────────────────┴──────────────────┴────────────┴────────────┤
-│  [Select All Original] [Select All Option 1] [✦ Lowest Price]     │
-│                                              [Cancel]  [Apply →]  │
-└────────────────────────────────────────────────────────────────────┘
-```
-
-### 3.3 Column structure
-
-**Row header column (leftmost, fixed):**
-- Generic group name (e.g. "Paracetamol 500mg")
-- Medicine name from cart (sub-label)
-- "── No generic ──" for medicines with no generic_name_id
-
-**Option columns (ORIGINAL + up to 3 alternatives):**
-- ORIGINAL is always first (even if more expensive)
-- Alternatives sorted by sale_price ASC (cheapest first)
-- If only 1 medicine exists for a generic: show ORIGINAL column only, no alternatives
-- Max 4 columns total (ORIGINAL + 3 alternatives)
-- If more than 3 alternatives exist: show cheapest 3
-
-**Greyed medicine rows (no generic):**
-- Show medicine name and current cart price in ORIGINAL column
-- Alternative columns show grey hatched pattern (░░░) with text "No alternative"
-- Radio button not shown for greyed rows — they cannot be changed
-- These items will always keep their original when Apply is clicked
-
-### 3.4 Per-row selection
-
-Each selectable medicine row has radio buttons per column.
-Default selection: ORIGINAL column for all rows.
-
-User can mix:
-- Row 1 (Paracetamol): select Option 1
-- Row 2 (Brufen): stays original (no alternatives, locked)
-
-### 3.5 Bulk selection buttons
-
-**[Select All Original]:**
-Sets all selectable rows to ORIGINAL column.
-
-**[Select All Option 1]** (or Option 2 etc — one button per
-alternative column):
-Sets all selectable rows to that column.
-If a row has no alternative in that column: keeps ORIGINAL
-for that row (does not error).
-
-**[✦ Lowest Price]:**
-For each selectable row independently:
-  Find the column with the lowest sale_price for that generic.
-  Set that row's selection to that column.
-  If tie: prefer ORIGINAL (no unnecessary switch).
 Example:
-  Row 1 Paracetamol: Original=18.50, Option1=14.00, Option2=15.00
-    → selects Option 1 (14.00)
-  Row 2 Brufen: no alternatives → stays Original
+  Tiers configured: 5%, 10%, 15%
+  Pharmacist A → max tier: 10% → sees [5%, 10%] at checkout
+  Pharmacist B → max tier: 5% → sees [5%] at checkout
+  Pharmacist C → no grant → no special discount at checkout
 
-### 3.6 Summary row
+### 3.2 Server action: updateUserSpecialDiscount
 
-Below all medicine rows, a summary row shows column totals:
-- Gross at MRP: sum of (mrp × qty) for selected items in that column
-- Patient Discount: sum of ((mrp - salePrice) × qty)
-- Net Total: sum of (salePrice × qty)
-
-Quantities come from current cart quantities for cart-mode items,
-or 1 for search-mode added items.
-
-The currently selected column is highlighted (green border/header).
-
-### 3.7 Apply button
-
-On [Apply →]:
-1. For each selectable row, take the selected column's medicine
-2. For medicines that changed (not ORIGINAL selected):
-   - Remove the original medicine from cart
-   - Add the alternative medicine with its best batch
-   - Keep the same quantity as the original
-   - If alternative availableQty < cart qty: cap at availableQty
-     and show a warning toast per item capped
-3. For medicines that stayed ORIGINAL: no cart change
-4. For greyed rows (no generic): no cart change
-5. Close wizard
-6. Show success toast: "Cart updated with X alternative(s)"
-
-### 3.8 Cancel / Esc
-
-Closes wizard with no cart changes.
+In app/actions/users.ts:
+  superadmin only
+  Updates profiles.special_discount_max_tier
+  Validates value is one of the configured tiers or NULL
+  logAction(ACTION_TYPES.USER_UPDATED)
 
 ---
 
-## Part 4 — Wizard Component Structure
+## Part 4 — Checkout Modal UI
 
-### Files to create
+### 4.1 Special discount field
 
-```
-components/pos/generics/GenericComparisonWizard.tsx  (main)
-components/pos/generics/GenericWizardRow.tsx          (one row)
-components/pos/generics/GenericWizardSummary.tsx      (totals row)
-components/pos/generics/GenericWizardSearch.tsx       (search mode)
-```
+In CheckoutModal.tsx, add a Special Discount section between
+the cart summary and the payment received field.
 
-### GenericComparisonWizard props
+Show only when ALL of these are true:
+  - special_discount_enabled = 'true'
+  - Current pharmacist has special_discount_max_tier IS NOT NULL
+  - Cart is not empty
 
-```typescript
-interface GenericComparisonWizardProps {
-  // Cart mode (F3 from active cart)
-  cartItems?:      CartItem[]
+UI:
+  Label: "Special Discount"
+  Small note: "For personal/family customers"
+  Dropdown: tiers up to and including pharmacist's max tier
+    First option: "— No special discount —" (default)
+    Then each eligible tier: "5%" or "Rs 50.00"
+  
+  When a tier is selected, show computed discount amount:
+    percentage: (netValue × tier / 100) formatted as Rs X.00
+    fixed: the fixed amount formatted as Rs X.00
+  
+  Final total updates live as tier is selected.
 
-  // Callbacks
-  onApply:         (replacements: MedicineReplacement[]) => void
-  onClose:         () => void
-}
+### 4.2 Updated totals display in checkout
 
-interface MedicineReplacement {
-  originalCartItemId: string     // CartItem.id to remove
-  newMedicineId:      string
-  newMedicineName:    string
-  newBatchId:         string
-  newBatchNo:         string
-  newExpiryDate:      string | null
-  newSalePrice:       number
-  newMrp:             number
-  quantity:           number     // capped at availableQty
-}
-```
+When special discount is selected:
+  Net Value:              Rs 1,000.00
+  Special Discount (5%): -Rs    50.00
+  ──────────────────────────────────
+  TOTAL:                  Rs   950.00
 
-### POSPage integration
+### 4.3 Passing to complete_sale()
 
-POSPage manages wizard open state:
-```typescript
-const [wizardOpen, setWizardOpen] = useState(false)
-```
+The existing p_discount_amt parameter carries the computed
+special discount amount.
 
-F3 key handler (in all layout keyboard handlers):
-```typescript
-if (e.key === 'F3') {
-  e.preventDefault()
-  setWizardOpen(true)
-}
-```
+Before calling complete_sale(), also record:
+  special_discount_applied: true
+  special_discount_type: current setting type
+  special_discount_value: selected tier value
 
-GenericComparisonWizard rendered at POSPage level (above layouts):
-```typescript
-{wizardOpen && (
-  <GenericComparisonWizard
-    cartItems={items}
-    onApply={handleGenericApply}
-    onClose={() => setWizardOpen(false)}
-  />
-)}
-```
+These are written to the sales row via an UPDATE after
+complete_sale() returns the sale ID, OR pass as additional
+fields if complete_sale() is extended.
 
-handleGenericApply in POSPage:
-```typescript
-function handleGenericApply(replacements: MedicineReplacement[]) {
-  replacements.forEach(r => {
-    removeItem(r.originalCartItemId)
-    addItem({
-      medicineId:         r.newMedicineId,
-      medicineName:       r.newMedicineName,
-      batchId:            r.newBatchId,
-      batchNo:            r.newBatchNo,
-      expiryDate:         r.newExpiryDate,
-      unitPrice:          r.newSalePrice,
-      mrp:                r.newMrp,
-      quantity:           r.quantity,
-      specialDiscountPct: 0,
-      // isControlled, isPrescription: look up from medicine data
-      // or default false for generic alternatives
-    })
-  })
-  setWizardOpen(false)
-}
-```
+Simplest approach: after complete_sale() returns sale_id,
+run a separate UPDATE:
+  UPDATE sales SET
+    special_discount_applied = true,
+    special_discount_type = p_type,
+    special_discount_value = p_value,
+    discount_amount = computed_amount
+  WHERE id = sale_id
+
+This avoids RPC signature change.
+
+### 4.4 Passing pharmacist discount data to CheckoutModal
+
+CheckoutModal needs:
+  pharmacistMaxTier: number | null  (from profiles)
+  discountTiers: number[]           (from settings)
+  discountType: 'percentage'|'fixed' (from settings)
+  discountEnabled: boolean          (from settings)
+
+These are fetched server-side in app/pharmacist/pos/page.tsx
+alongside the other settings already fetched there.
+Pass down as props through POSPage → CheckoutModal.
 
 ---
 
-## Part 5 — Migration File
+## Part 5 — Receipt Update
 
-supabase/migrations/030_generic_alternatives_function.sql
+When special discount was applied, add to receipt totals:
+  Special Discount (5%):  -Rs  50.00
+
+Between Net Value and Freight lines. Same conditional display
+pattern as Patient Discount — only show when applied.
+
+---
+
+## Part 6 — Audit Log
+
+Add to ACTION_TYPES if not present:
+  SPECIAL_DISCOUNT_GRANTED = 'SPECIAL_DISCOUNT_GRANTED'
+
+Log when superadmin grants/revokes special discount permission
+on a pharmacist profile.
+
+---
+
+## Migration File
+
+supabase/migrations/029_special_discount.sql
 
 ---
 
 ## Implementation Sessions
 
-### Session A — DB function + server action
-1. Verify \d medicines, \d stock_batches, \d generic_names first
-2. Migration 030 SQL
-3. getGenericAlternatives server action in app/actions/pos.ts
-4. Verification SQL smoke tests
-5. tsc
+### Session A — Migration + settings + user management
+1. Migration 029 SQL
+2. Settings UI section for special discount
+3. User management: grant field on pharmacist edit form
+4. Server actions for both
+5. tsc + jest
 
-### Session B — Wizard UI
-1. GenericComparisonWizard main component
-2. GenericWizardRow per-row component
-3. GenericWizardSummary totals
-4. POSPage integration (state, F3 handler, onApply)
-5. Wire [Generics] button in all 3 layouts to setWizardOpen(true)
-6. tsc + build + jest
-
----
-
-## Spec Version
-Created: 2026-06-26
-Migration: 030 (follows 029 special discount)
-Depends on: Phase 5B (CartItem type, batch fields, layout variants)
-            Migration 023 (generic_names table)
+### Session B — Checkout modal + receipt
+1. Fetch discount settings in pos/page.tsx
+2. CheckoutModal special discount section
+3. Post-sale UPDATE for special_discount columns
+4. Receipt update
+5. tsc + build + jest

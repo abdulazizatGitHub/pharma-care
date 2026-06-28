@@ -211,3 +211,62 @@ export async function getItemReturnHistory(
   if (error) return { data: null, error: error.message }
   return { data: (data as ItemReturnRow[]) ?? [], error: null }
 }
+
+// ─── 7. getGenericAlternatives ────────────────────────────────────────────────
+
+export interface GenericAlternative {
+  genericNameId:  string
+  genericName:    string
+  originalMedId:  string
+  medicineId:     string
+  medicineName:   string
+  manufacturer:   string | null
+  isOriginal:     boolean
+  batchId:        string
+  batchNo:        string
+  expiryDate:     string | null
+  availableQty:   number
+  purchasePrice:  number | null
+  salePrice:      number
+  mrp:            number
+  discountPct:    number
+  optionIndex:    number
+}
+
+export async function getGenericAlternatives(
+  medicineIds: string[],
+): Promise<Result<GenericAlternative[]>> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role) return NOT_AUTH
+  if (role !== 'pharmacist' && role !== 'admin' && role !== 'superadmin') return ACCESS_DENIED
+
+  // Skip RPC for empty input — DB function handles it but saves a round-trip
+  if (medicineIds.length === 0) return { data: [], error: null }
+
+  const { data, error } = await supabase.rpc('get_generic_alternatives', {
+    p_medicine_ids: medicineIds,
+  })
+
+  if (error) return { data: null, error: error.message }
+
+  const mapped: GenericAlternative[] = ((data as Record<string, unknown>[]) ?? []).map(r => ({
+    genericNameId: r.generic_name_id  as string,
+    genericName:   r.generic_name     as string,
+    originalMedId: r.original_med_id  as string,
+    medicineId:    r.medicine_id      as string,
+    medicineName:  r.medicine_name    as string,
+    manufacturer:  r.manufacturer     as string | null,
+    isOriginal:    r.is_original      as boolean,
+    batchId:       r.batch_id         as string,
+    batchNo:       r.batch_no         as string,
+    expiryDate:    r.expiry_date      as string | null,
+    availableQty:  r.available_qty    as number,
+    purchasePrice: r.purchase_price   as number | null,
+    salePrice:     r.sale_price       as number,
+    mrp:           r.mrp              as number,
+    discountPct:   r.discount_pct     as number,
+    optionIndex:   r.option_index     as number,
+  }))
+
+  return { data: mapped, error: null }
+}

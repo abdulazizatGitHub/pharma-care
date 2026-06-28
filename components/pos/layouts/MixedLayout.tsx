@@ -5,10 +5,12 @@ import { Trash2, CheckCircle, PauseCircle, RotateCcw, FlaskConical, ArrowRightLe
 import { CardLayout }          from '@/components/pos/layouts/CardLayout'
 import { CartTotals }          from '@/components/pos/CartTotals'
 import { BatchPicker }         from '@/components/pos/BatchPicker'
-import { LendToPharmacyModal } from '@/components/pos/LendToPharmacyModal'
+import { BatchItemSelector }   from '@/components/pos/BatchItemSelector'
 import { Button }              from '@/components/ui/Button'
+import { useToast }            from '@/components/ui/Toast'
 import { getBatchesForMedicine } from '@/app/actions/stock'
 import { useCart }       from '@/lib/pos-context'
+import { focusNextQtyInput } from '@/lib/pos-shortcuts'
 import type { CardLayoutHandle } from '@/components/pos/layouts/CardLayout'
 import type { BatchForDropdown } from '@/app/actions/stock'
 import type { POSMedicineResult, ParkedSale, ReturnCredit, CartItem as CartItemType } from '@/lib/pos-types'
@@ -23,6 +25,8 @@ interface Props {
   onHold:            () => void
   onCheckout:        () => void
   onReturns:         () => void
+  onCompareGenerics: () => void
+  onLend:            () => void
   returnCredit?:     ReturnCredit | null
 }
 
@@ -64,15 +68,22 @@ export function MixedLayout({
   onHold,
   onCheckout,
   onReturns,
+  onCompareGenerics,
+  onLend,
   returnCredit,
 }: Props) {
-  const { items, updateQuantity, removeItem, replaceItemBatch } = useCart()
+  const { items, addItem, updateQuantity, removeItem, replaceItemBatch } = useCart()
   const cardRef = useRef<CardLayoutHandle | null>(null)
+
+  const { toast } = useToast()
 
   const [batchPickerItem,    setBatchPickerItem]    = useState<CartItemType | null>(null)
   const [batchPickerBatches, setBatchPickerBatches] = useState<BatchForDropdown[]>([])
   const [batchPickerLoading, setBatchPickerLoading] = useState(false)
-  const [lendModalOpen,      setLendModalOpen]      = useState(false)
+  const [batchSelectorOpen,  setBatchSelectorOpen]  = useState(false)
+  const [lastRemoved,        setLastRemoved]        = useState<CartItemType | null>(null)
+  const [undoTimer,          setUndoTimer]          = useState<ReturnType<typeof setTimeout> | null>(null)
+  const [deleteSelectorOpen, setDeleteSelectorOpen] = useState(false)
 
   async function handleChangeBatch(item: CartItemType) {
     setBatchPickerLoading(true)
@@ -102,6 +113,29 @@ export function MixedLayout({
     setBatchPickerBatches([])
   }
 
+  function doRemove(item: CartItemType) {
+    removeItem(item.id)
+    setLastRemoved(item)
+    if (undoTimer) clearTimeout(undoTimer)
+    const timer = setTimeout(() => setLastRemoved(null), 5000)
+    setUndoTimer(timer)
+    toast(`${item.medicineName} removed — press Backspace to undo`, 'info')
+  }
+
+  function doUndo() {
+    if (!lastRemoved) return
+    addItem(lastRemoved)
+    const name = lastRemoved.medicineName
+    setLastRemoved(null)
+    if (undoTimer) clearTimeout(undoTimer)
+    setUndoTimer(null)
+    toast(`${name} restored`, 'success')
+  }
+
+  useEffect(() => {
+    return () => { if (undoTimer) clearTimeout(undoTimer) }
+  }, [undoTimer])
+
   // Keyboard shortcuts — F2 focuses the search inside CardLayout
   useEffect(() => {
     function handler(e: KeyboardEvent) {
@@ -111,20 +145,63 @@ export function MixedLayout({
       if (e.key === 'F6') { e.preventDefault(); onReturns();  return }
       if (e.key === 'F9') { e.preventDefault(); onCheckout(); return }
       if (e.key === 'Delete') {
-        const active = document.activeElement as HTMLInputElement | null
-        const itemId = active?.dataset.qtyInput
-        if (itemId) {
-          const item = items.find(i => i.id === itemId)
-          if (item && item.quantity <= 1) {
+        const focused = document.activeElement as HTMLElement
+        const focusedItemId = focused?.getAttribute('data-qty-input')
+
+        if (focusedItemId) {
+          const input = focused as HTMLInputElement
+          const qty = parseInt(input.value, 10) || 0
+          if (qty <= 1) {
             e.preventDefault()
-            removeItem(itemId)
+            const item = items.find(i => i.id === focusedItemId)
+            if (item) {
+              doRemove(item)
+              const all = Array.from(
+                document.querySelectorAll<HTMLInputElement>('[data-qty-input]')
+              )
+              const idx = all.indexOf(input)
+              const target = all[idx - 1] ?? all[0]
+              if (target && target !== input) {
+                setTimeout(() => { target.focus(); target.select() }, 50)
+              }
+            }
           }
+          return
         }
+
+        e.preventDefault()
+        const nonBorrowed = items.filter(i => !i.isBorrowed)
+        if (nonBorrowed.length === 0) return
+        if (nonBorrowed.length === 1) {
+          doRemove(nonBorrowed[0])
+          return
+        }
+        setDeleteSelectorOpen(true)
+      }
+      if (e.key === 'Backspace') {
+        const focused = document.activeElement
+        const isInput = focused instanceof HTMLInputElement ||
+          focused instanceof HTMLTextAreaElement
+        if (isInput) return
+        if (lastRemoved) {
+          e.preventDefault()
+          doUndo()
+        }
+      }
+      if (e.key === 'b' || e.key === 'B') {
+        e.preventDefault()
+        const nonBorrowed = items.filter(i => !i.isBorrowed)
+        if (nonBorrowed.length === 0) return
+        if (nonBorrowed.length === 1) {
+          handleChangeBatch(nonBorrowed[0])
+          return
+        }
+        setBatchSelectorOpen(true)
       }
     }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [items, onHold, onCheckout, onReturns, removeItem])
+  }, [items, onHold, onCheckout, onReturns, removeItem, lastRemoved])
 
   return (
     <>
@@ -259,6 +336,12 @@ export function MixedLayout({
                         onChange={e => updateQuantity(item.id, Number(e.target.value))}
                         onBlur={e => { if (Number(e.target.value) < 1) updateQuantity(item.id, 1) }}
                         onFocus={e => e.currentTarget.select()}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            focusNextQtyInput(e.currentTarget as HTMLInputElement)
+                          }
+                        }}
                         style={{
                           width: 44, textAlign: 'center',
                           border: '1px solid #e5e7eb', borderRadius: 4,
@@ -328,8 +411,8 @@ export function MixedLayout({
             <Button
               variant="secondary"
               icon={<FlaskConical size={14} />}
-              onClick={() => {}}
-              disabled
+              onClick={onCompareGenerics}
+              disabled={items.length === 0}
               tabIndex={-1}
               className="w-full"
             >
@@ -339,11 +422,12 @@ export function MixedLayout({
             <Button
               variant="secondary"
               icon={<ArrowRightLeft size={14} />}
-              onClick={() => setLendModalOpen(true)}
+              onClick={onLend}
               tabIndex={-1}
               className="w-full"
             >
               Lend to Pharmacy
+              <KbdBadge label="F8" />
             </Button>
             <Button
               variant="secondary"
@@ -371,10 +455,30 @@ export function MixedLayout({
         onClose={closeBatchPicker}
       />
     )}
-    <LendToPharmacyModal
-      open={lendModalOpen}
-      onClose={() => setLendModalOpen(false)}
-    />
+    {batchSelectorOpen && (
+      <BatchItemSelector
+        items={items.filter(i => !i.isBorrowed)}
+        onSelect={(item) => {
+          setBatchSelectorOpen(false)
+          handleChangeBatch(item)
+        }}
+        onClose={() => setBatchSelectorOpen(false)}
+        title="Change Batch"
+        actionLabel="Change"
+      />
+    )}
+    {deleteSelectorOpen && (
+      <BatchItemSelector
+        items={items.filter(i => !i.isBorrowed)}
+        onSelect={(item) => {
+          setDeleteSelectorOpen(false)
+          doRemove(item)
+        }}
+        onClose={() => setDeleteSelectorOpen(false)}
+        title="Remove Item"
+        actionLabel="Remove"
+      />
+    )}
     </>
   )
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState } from 'react'
-import { DollarSign } from 'lucide-react'
+
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { openShift } from '@/app/actions/shifts'
@@ -57,9 +57,9 @@ export function OpenShiftModal({ open, onClose, onSuccess }: Props) {
           <div style={{ position: 'relative' }}>
             <span style={{
               position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-              color: '#9ca3af', pointerEvents: 'none',
+              color: '#9ca3af', pointerEvents: 'none', fontSize: 13, fontWeight: 500,
             }}>
-              <DollarSign size={14} />
+              Rs
             </span>
             <input
               type="number"

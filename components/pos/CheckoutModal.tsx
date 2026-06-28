@@ -1,30 +1,35 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { CustomerSelector } from './CustomerSelector'
 import { ReceiptContent } from './ReceiptView'
 import { completeSale, deleteHeldSale } from '@/app/actions/sales'
 import { linkExchangeSale } from '@/app/actions/returns'
+import { createClient } from '@/lib/supabase/client'
 import { useCart } from '@/lib/pos-context'
 import type { ReturnCredit } from '@/lib/pos-types'
 
 interface Props {
-  open:              boolean
-  onClose:           () => void
-  pharmacyName:      string
-  pharmacyAddress:   string
-  headerNote:        string
-  cashierName:       string
-  receiptFooter:     string
-  returnPolicy:      string
-  showCashierName:   boolean
-  showReceiptNo:     boolean
-  cashierId:         string
-  onSaleComplete:    () => void
-  returnCredit?:     ReturnCredit | null
-  onExchangeComplete?: () => void
+  open:                    boolean
+  onClose:                 () => void
+  pharmacyName:            string
+  pharmacyAddress:         string
+  headerNote:              string
+  cashierName:             string
+  receiptFooter:           string
+  returnPolicy:            string
+  showCashierName:         boolean
+  showReceiptNo:           boolean
+  cashierId:               string
+  onSaleComplete:          () => void
+  returnCredit?:           ReturnCredit | null
+  onExchangeComplete?:     () => void
+  specialDiscountEnabled:  boolean
+  specialDiscountType:     'percentage' | 'fixed'
+  specialDiscountTiers:    number[]
+  specialDiscountMaxTier:  number | null
 }
 
 interface CompletedSale {
@@ -86,6 +91,10 @@ export function CheckoutModal({
   onSaleComplete,
   returnCredit,
   onExchangeComplete,
+  specialDiscountEnabled,
+  specialDiscountType,
+  specialDiscountTiers,
+  specialDiscountMaxTier,
 }: Props) {
   const {
     items, customerId, customerName,
@@ -102,6 +111,9 @@ export function CheckoutModal({
   const [saleNote,      setSaleNote]      = useState('')
   const [error,         setError]         = useState<string | null>(null)
   const [loading,       setLoading]       = useState(false)
+  const [selectedTier,  setSelectedTier]  = useState<number | null>(null)
+
+  const amountInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (open) {
@@ -111,14 +123,27 @@ export function CheckoutModal({
       setError(null)
       setPaymentType('cash')
       setSaleNote('')
+      setSelectedTier(null)
     }
   }, [open])
 
-  // Return credit calculations
-  const creditAmount      = returnCredit?.amount ?? 0
-  const effectiveTotal    = Math.max(0, total - creditAmount)
-  const refundToCustomer  = Math.max(0, creditAmount - total)
-  const isCreditCovered   = effectiveTotal <= 0  // credit covers everything
+  const creditAmount = returnCredit?.amount ?? 0
+
+  // Special discount computation
+  const eligibleTiers = specialDiscountEnabled && specialDiscountMaxTier !== null
+    ? specialDiscountTiers.filter(t => t <= specialDiscountMaxTier)
+    : []
+  const showSpecialDiscount = eligibleTiers.length > 0
+
+  const specialDiscountAmt = selectedTier === null ? 0
+    : specialDiscountType === 'percentage'
+      ? Math.round(total * selectedTier / 100 * 100) / 100
+      : selectedTier
+
+  // effectiveTotal now subtracts special discount before return credit
+  const effectiveTotal   = Math.max(0, total - specialDiscountAmt - creditAmount)
+  const refundToCustomer = Math.max(0, creditAmount - (total - specialDiscountAmt))
+  const isCreditCovered  = effectiveTotal <= 0
 
   const amountPaid  = parseFloat(amountPaidStr) || 0
   const hasAmount   = amountPaidStr.trim() !== '' && amountPaid > 0
@@ -142,15 +167,15 @@ export function CheckoutModal({
     const itemRows = items.map(item => {
       const itemDiscAmt = Math.max(0, item.mrp - item.unitPrice) * item.quantity
       const discCell    = hasAnyDiscount
-        ? `<span class="idisc">${itemDiscAmt > 0 ? `Rs ${fmt(itemDiscAmt)}` : '&mdash;'}</span>`
+        ? `<span class="idisc">${itemDiscAmt > 0 ? fmt(itemDiscAmt) : '&mdash;'}</span>`
         : ''
       return `
         <div class="irow">
           <span class="iname">${escHtml(item.medicineName)}</span>
           <span class="iqty">${item.quantity}</span>
-          <span class="imrp">Rs ${fmt(item.mrp)}</span>
+          <span class="imrp">${fmt(item.mrp)}</span>
           ${discCell}
-          <span class="iamt">Rs ${fmt(item.totalPrice)}</span>
+          <span class="iamt">${fmt(item.totalPrice)}</span>
         </div>`
     }).join('')
 
@@ -173,20 +198,27 @@ export function CheckoutModal({
       ? `<div class="row"><span>Customer:</span><span>${escHtml(customerName)}</span></div>`
       : ''
     const grossRow       = hasAnyDiscount
-      ? `<div class="row muted"><span>Gross Value (at MRP):</span><span>Rs ${fmt(grossAtMRP)}</span></div>`
+      ? `<div class="row muted"><span>Gross Value (at MRP):</span><span>${fmt(grossAtMRP)}</span></div>`
       : ''
     const patientDiscRow = hasAnyDiscount
-      ? `<div class="row green"><span>Patient Discount:</span><span>-Rs ${fmt(patientDiscount)}</span></div>`
+      ? `<div class="row green"><span>Patient Discount:</span><span>-${fmt(patientDiscount)}</span></div>`
       : ''
     const saleDiscRow    = discountAmount > 0
-      ? `<div class="row green"><span>Sale Discount:</span><span>-Rs ${fmt(discountAmount)}</span></div>`
+      ? `<div class="row green"><span>Sale Discount:</span><span>-${fmt(discountAmount)}</span></div>`
+      : ''
+    const specialDiscRow = specialDiscountAmt > 0
+      ? `<div class="row green"><span>Special Discount${
+          specialDiscountType === 'percentage' && selectedTier !== null
+            ? ` (${selectedTier}%)`
+            : ''
+        }:</span><span>-${fmt(specialDiscountAmt)}</span></div>`
       : ''
     const serviceFeeRow  = serviceFeeEnabled && serviceFee > 0
-      ? `<div class="row muted"><span>${escHtml(serviceFeeLabel)}:</span><span>Rs ${fmt(serviceFee)}</span></div>`
+      ? `<div class="row muted"><span>${escHtml(serviceFeeLabel)}:</span><span>${fmt(serviceFee)}</span></div>`
       : ''
     const paymentRows    = paymentType === 'cash'
-      ? `<div class="row"><span>Cash Received:</span><span>Rs ${fmt(amountPaid)}</span></div>
-         <div class="row"><span>Change:</span><span>Rs ${fmt(receiptChange)}</span></div>`
+      ? `<div class="row"><span>Cash Received:</span><span>${fmt(amountPaid)}</span></div>
+         <div class="row"><span>Change:</span><span>${fmt(receiptChange)}</span></div>`
       : `<div class="row"><span>Payment:</span><span>Credit (Udhaar)</span></div>`
     const returnRow      = returnPolicy.trim()
       ? `<div class="center small" style="margin-top:4px;">${escHtml(returnPolicy.trim())}</div>`
@@ -215,12 +247,14 @@ export function CheckoutModal({
       <div class="dashed"></div>
       ${grossRow}
       ${patientDiscRow}
-      <div class="row"><span>Net Value:</span><span>Rs ${fmt(netValue)}</span></div>
+      <div class="row"><span>Net Value:</span><span>${fmt(netValue)}</span></div>
       ${saleDiscRow}
+      ${specialDiscRow}
       ${serviceFeeRow}
       <div class="divider"></div>
-      <div class="row total"><span>TOTAL:</span><span>Rs ${fmt(total)}</span></div>
+      <div class="row total"><span>TOTAL:</span><span>Rs ${fmt(total - specialDiscountAmt)}</span></div>
       ${paymentRows}
+      <div class="center small muted">All amounts in PKR</div>
       <div class="divider"></div>
       <div class="center" style="font-size:11px;">${escHtml(receiptFooter)}</div>
       ${returnRow}`
@@ -251,7 +285,7 @@ export function CheckoutModal({
         unit_price:   item.unitPrice,
         discount_pct: item.discountPct,
       })),
-      discountAmt: discountAmount,
+      discountAmt: discountAmount + specialDiscountAmt,
       serviceFee,
       amountPaid: isCreditCovered ? 0 : amountPaid,
       notes: saleNote.trim() || notes,
@@ -283,6 +317,24 @@ export function CheckoutModal({
     // Held sale cleanup is fire-and-forget once the real sale is created
     if (heldSaleId) deleteHeldSale(heldSaleId)
 
+    // Record special discount metadata on the sale (fire-and-forget)
+    if (selectedTier !== null && result.data?.saleId) {
+      const supabase = createClient()
+      supabase
+        .from('sales')
+        .update({
+          special_discount_applied: true,
+          special_discount_type:    specialDiscountType,
+          special_discount_value:   selectedTier,
+        })
+        .eq('id', result.data.saleId)
+        .then(({ error: updateErr }) => {
+          if (updateErr) {
+            console.error('[CheckoutModal] Failed to record special discount:', updateErr.message)
+          }
+        })
+    }
+
     const now = new Date()
     setSaleTime(now)
     setCompletedSale(result.data)
@@ -293,6 +345,38 @@ export function CheckoutModal({
       printReceipt(buildReceiptHtml(result.data.receiptNo, result.data.change))
     }
   }
+
+  useEffect(() => {
+    if (!open) return
+    function handler(e: KeyboardEvent) {
+      if (e.key !== 'Enter') return
+      // Receipt state: Enter closes and starts new sale
+      if (modalState === 'receipt' && completedSale) {
+        e.preventDefault()
+        handleDone()
+        return
+      }
+      // Form state only below
+      if (modalState !== 'form') return
+      if (e.target instanceof HTMLTextAreaElement) return
+      e.preventDefault()
+      if (paymentType === 'cash' &&
+          (!amountPaidStr.trim() || parseFloat(amountPaidStr) <= 0)) {
+        amountInputRef.current?.focus()
+        amountInputRef.current?.select()
+        return
+      }
+      if (canComplete && !loading) {
+        if (e.shiftKey) {
+          handleComplete(false)   // Shift+Enter = without print
+        } else {
+          handleComplete(true)    // Enter = with print
+        }
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [open, modalState, completedSale, paymentType, amountPaidStr, canComplete, loading, handleComplete, handleDone])
 
   function handlePrintFromPreview() {
     if (!completedSale) return
@@ -352,12 +436,15 @@ export function CheckoutModal({
                 serviceFee={serviceFee}
                 serviceFeeLabel={serviceFeeLabel}
                 serviceFeeEnabled={serviceFeeEnabled}
-                total={total}
+                total={total - specialDiscountAmt}
                 paymentType={paymentType}
                 amountPaid={amountPaid}
                 change={completedSale.change}
                 returnPolicy={returnPolicy}
                 receiptFooter={receiptFooter}
+                specialDiscountAmt={specialDiscountAmt}
+                specialDiscountType={specialDiscountType}
+                selectedTier={selectedTier}
               />
             </div>
           </div>
@@ -445,6 +532,46 @@ export function CheckoutModal({
                   <span>Rs {serviceFee.toFixed(2)}</span>
                 </div>
               )}
+              {showSpecialDiscount && (
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[11px] font-medium text-[#6b7280]">
+                      Special Discount
+                    </span>
+                    <span className="text-[9px] text-[#9ca3af] ml-1">
+                      (personal/family)
+                    </span>
+                  </div>
+                  <select
+                    value={selectedTier ?? ''}
+                    onChange={e => {
+                      const val = e.target.value
+                      setSelectedTier(val === '' ? null : parseFloat(val))
+                    }}
+                    className="text-[11px] border border-[rgba(0,0,0,0.15)] rounded px-1.5 py-0.5 text-[#111827] focus:outline-none focus:ring-1 focus:ring-[#0F6E56]"
+                  >
+                    <option value="">— None —</option>
+                    {eligibleTiers.map(t => (
+                      <option key={t} value={t}>
+                        {specialDiscountType === 'percentage'
+                          ? `${t}%`
+                          : `Rs ${t.toFixed(2)}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {specialDiscountAmt > 0 && (
+                <div className="flex justify-between text-[12px]" style={{ color: '#0F6E56' }}>
+                  <span>
+                    Special discount
+                    {specialDiscountType === 'percentage' && selectedTier !== null
+                      ? ` (${selectedTier}%)`
+                      : ''}
+                  </span>
+                  <span>−Rs {specialDiscountAmt.toFixed(2)}</span>
+                </div>
+              )}
               {returnCredit && (
                 <div className="flex justify-between text-[12px]" style={{ color: '#D97706' }}>
                   <span>Return credit ({returnCredit.returnNo})</span>
@@ -525,6 +652,7 @@ export function CheckoutModal({
                     Amount received (Rs)
                   </label>
                   <input
+                    ref={amountInputRef}
                     type="number"
                     min="0"
                     step="0.01"
@@ -549,7 +677,7 @@ export function CheckoutModal({
                     <>
                       <p className="text-[10px] text-[#A32D2D] mb-0.5">Short by</p>
                       <p className="text-3xl font-medium text-[#A32D2D]">
-                        Rs {(total - amountPaid).toFixed(2)}
+                        Rs {(effectiveTotal - amountPaid).toFixed(2)}
                       </p>
                     </>
                   ) : (
@@ -609,6 +737,11 @@ export function CheckoutModal({
                 >
                   Complete without Print
                 </Button>
+              )}
+              {!isCreditCovered && (
+                <p style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>
+                  Enter = Complete &amp; Print · Shift+Enter = Complete without Print · Esc = Cancel
+                </p>
               )}
               <button
                 type="button"

@@ -3,6 +3,7 @@
 import React from 'react'
 import { Trash2, Minus, Plus } from 'lucide-react'
 import { useCart } from '@/lib/pos-context'
+import { focusNextQtyInput } from '@/lib/pos-shortcuts'
 import type { CartItem as CartItemType } from '@/lib/pos-types'
 
 interface Props {
@@ -78,6 +79,7 @@ export function CartItemRow({ item, onChangeBatch }: Props) {
             </p>
           )}
         </div>
+        {/* TODO: add undo support to trash button click */}
         <button
           onClick={() => removeItem(item.id)}
           tabIndex={-1}
@@ -120,6 +122,12 @@ export function CartItemRow({ item, onChangeBatch }: Props) {
             value={item.quantity}
             data-qty-input={item.id}
             onChange={e => updateQuantity(item.id, parseInt(e.target.value, 10) || 1)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                focusNextQtyInput(e.currentTarget as HTMLInputElement)
+              }
+            }}
             className="w-9 h-6 text-center text-[11px] text-[#111827] border-x border-[rgba(0,0,0,0.1)] focus:outline-none focus:ring-1 focus:ring-[#0F6E56]"
             aria-label="Quantity"
           />

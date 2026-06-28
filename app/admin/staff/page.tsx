@@ -36,7 +36,7 @@ export default async function AdminStaffPageRoute() {
   const [{ data: profiles }, { data: permOverrides }, { data: setting }] = await Promise.all([
     supabase
       .from('profiles')
-      .select('id, full_name, role, is_active, username, phone, joined_at')
+      .select('id, full_name, role, is_active, username, phone, joined_at, special_discount_max_tier')
       .eq('role', 'pharmacist')
       .order('created_at', { ascending: true }),
     supabase
@@ -66,8 +66,9 @@ export default async function AdminStaffPageRoute() {
     role:         'pharmacist' as const,
     is_active:    p.is_active,
     joined_at:    p.joined_at,
-    grants:       permsByUser[p.id]?.grants       ?? [],
-    restrictions: permsByUser[p.id]?.restrictions ?? [],
+    grants:                    permsByUser[p.id]?.grants       ?? [],
+    restrictions:              permsByUser[p.id]?.restrictions ?? [],
+    special_discount_max_tier: (p.special_discount_max_tier as number | null) ?? null,
   }))
 
   const pharmacyName = setting?.value ?? 'pharmacare'
