@@ -2,20 +2,18 @@
 
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
   Package,
   Truck,
-  ClipboardList,
   Users,
+  Landmark,
   Clock,
   BarChart2,
-  Wallet,
   UserCog,
   Pill,
   LogOut,
-  Landmark,
   ChevronDown,
 } from 'lucide-react'
 import { signOut } from '@/app/actions/auth'
@@ -26,9 +24,11 @@ import { ICON_SIZE, SIDEBAR, BRAND } from '@/lib/design-tokens'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type GroupChild =
-  | { href: string;     label: string; disabled?: never }
-  | { href?: undefined; label: string; disabled: true }
+interface GroupChild {
+  href: string
+  label: string
+  permission: Permission | null
+}
 
 interface NavItem {
   type?: 'item'
@@ -42,7 +42,6 @@ interface NavGroup {
   type: 'group'
   label: string
   icon: React.ComponentType<{ size?: number; className?: string }>
-  permission: Permission | null
   children: GroupChild[]
 }
 
@@ -51,28 +50,60 @@ type NavEntry = NavItem | NavGroup
 // ─── Navigation data ──────────────────────────────────────────────────────────
 
 const NAV_ENTRIES: NavEntry[] = [
-  { href: '/admin/dashboard',       label: 'Dashboard',       icon: LayoutDashboard, permission: null },
-  { href: '/admin/inventory',       label: 'Inventory',       icon: Package,         permission: 'inventory_view' },
-  { href: '/admin/suppliers',       label: 'Suppliers',       icon: Truck,           permission: 'suppliers' },
-  { href: '/admin/purchase-orders', label: 'Purchase Orders', icon: ClipboardList,   permission: 'purchase_orders' },
-  { href: '/admin/customers',       label: 'Customers',       icon: Users,           permission: 'customers' },
-  { href: '/admin/shifts',          label: 'Shifts',          icon: Clock,           permission: 'shifts' },
+  { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: null },
   {
-    type: 'group',
-    label: 'Reports',
-    icon: BarChart2,
-    permission: 'reports_full',
+    type: 'group', label: 'Medicines & Stock', icon: Package,
     children: [
-      { href: '/admin/reports',             label: 'Overview' },
-      { href: '/admin/reports/item-detail', label: 'Item Detail' },
-      { label: 'Supplier Report',           disabled: true },
-      { label: 'Batch Report',              disabled: true },
+      { href: '/admin/inventory',       label: 'Inventory',       permission: 'inventory_view' },
+      { href: '/admin/purchase-orders', label: 'Purchase Orders', permission: 'purchase_orders' },
     ],
   },
-  { href: '/admin/expenses',        label: 'Expenses',        icon: Wallet,          permission: 'expenses' },
-  { href: '/admin/staff',           label: 'Staff',           icon: UserCog,         permission: 'user_manage_pharmacists' },
-  { href: '/admin/ledger',          label: 'Ledger',          icon: Landmark,        permission: null },
+  {
+    type: 'group', label: 'Suppliers', icon: Truck,
+    children: [
+      { href: '/admin/suppliers',        label: 'Supplier List',   permission: 'suppliers' },
+      { href: '/admin/ledger/suppliers', label: 'Supplier Ledger', permission: 'suppliers' },
+    ],
+  },
+  {
+    type: 'group', label: 'Customers', icon: Users,
+    children: [
+      { href: '/admin/customers',        label: 'Customers',          permission: 'customers' },
+      { href: '/admin/ledger/customers', label: 'Customers (Udhaar)', permission: 'customers' },
+    ],
+  },
+  {
+    type: 'group', label: 'Accounting', icon: Landmark,
+    children: [
+      { href: '/admin/ledger',   label: 'Overview',  permission: null },
+      { href: '/admin/expenses', label: 'Expenses',  permission: 'expenses' },
+    ],
+  },
+  {
+    type: 'group', label: 'Operations', icon: Clock,
+    children: [
+      { href: '/admin/shifts', label: 'Shifts', permission: 'shifts' },
+    ],
+  },
+  {
+    type: 'group', label: 'Reports', icon: BarChart2,
+    children: [
+      { href: '/admin/reports',             label: 'Overview',    permission: 'reports_full' },
+      { href: '/admin/reports/item-detail', label: 'Item Detail', permission: 'reports_full' },
+    ],
+  },
+  { href: '/admin/staff', label: 'Staff Management', icon: UserCog, permission: 'user_manage_pharmacists' },
 ]
+
+const AD_STORAGE_KEY = 'sidebar_admin_groups'
+
+function getActiveGroupAD(pathname: string): string | null {
+  for (const entry of NAV_ENTRIES) {
+    if (entry.type !== 'group') continue
+    if (entry.children.some(c => pathname === c.href)) return entry.label
+  }
+  return null
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -82,45 +113,33 @@ interface Props {
 
 export function AdminSidebar({ pharmacyName }: Props) {
   const pathname = usePathname()
-  const router   = useRouter()
-  const [expanded,    setExpanded]    = useState(false)
-  const [reportsOpen, setReportsOpen] = useState(false)
+  const [expanded,   setExpanded]   = useState(false)
+  const [groupsOpen, setGroupsOpen] = useState<Record<string, boolean>>({})
   const { permissions } = useDashboardUser()
 
-  // Restore group state from localStorage on mount (avoids hydration mismatch
-  // by not reading storage during SSR — useState(false) is the server value).
   useEffect(() => {
+    let stored: Record<string, boolean> = {}
     try {
-      const stored = localStorage.getItem('sidebar_reports_expanded')
-      if (stored === 'true') setReportsOpen(true)
-    } catch {
-      // localStorage unavailable (e.g. private browsing with blocked storage)
-    }
-  }, [])
+      const raw = localStorage.getItem(AD_STORAGE_KEY)
+      if (raw) stored = JSON.parse(raw) as Record<string, boolean>
+    } catch {}
+    const active = getActiveGroupAD(pathname)
+    if (active) stored = { ...stored, [active]: true }
+    setGroupsOpen(stored)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-expand when the current route is inside /admin/reports.
   useEffect(() => {
-    if (pathname.startsWith('/admin/reports')) {
-      setReportsOpen(true)
-    }
+    const active = getActiveGroupAD(pathname)
+    if (active) setGroupsOpen(prev => ({ ...prev, [active]: true }))
   }, [pathname])
 
-  function toggleReports() {
-    setReportsOpen(prev => {
-      const next = !prev
-      try { localStorage.setItem('sidebar_reports_expanded', String(next)) } catch {}
+  function toggleGroup(label: string) {
+    setGroupsOpen(prev => {
+      const next = { ...prev, [label]: !prev[label] }
+      try { localStorage.setItem(AD_STORAGE_KEY, JSON.stringify(next)) } catch {}
       return next
     })
   }
-
-  function handleReportsClick() {
-    toggleReports()
-    router.push('/admin/reports')
-  }
-
-  const visibleEntries = NAV_ENTRIES.filter(
-    entry => entry.permission === null || hasPermission(permissions, entry.permission),
-  )
 
   return (
     <aside
@@ -161,111 +180,67 @@ export function AdminSidebar({ pharmacyName }: Props) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-hidden" style={{ paddingBottom: 4 }}>
+      <nav className="flex-1 overflow-y-auto" style={{ paddingBottom: 4 }}>
         <ul style={{ listStyle: 'none', margin: 0, padding: '0 6px' }}>
-          {visibleEntries.map((entry, i) => {
+          {NAV_ENTRIES.map((entry, i) => {
 
-            // ── Collapsible group (Reports) ───────────────────────────────────
+            // ── Collapsible group ────────────────────────────────────────────
             if (entry.type === 'group') {
-              const groupActive = pathname.startsWith('/admin/reports')
+              const visChildren = entry.children.filter(
+                c => c.permission === null || hasPermission(permissions, c.permission),
+              )
+              if (visChildren.length === 0) return null
+
+              const isOpen      = !!groupsOpen[entry.label]
+              const groupActive = visChildren.some(c => pathname === c.href)
               return (
                 <li key={`group-${entry.label}`}>
-                  {/* Parent row — toggles open/closed AND navigates to overview */}
                   <button
                     type="button"
-                    onClick={handleReportsClick}
+                    onClick={() => toggleGroup(entry.label)}
                     title={!expanded ? entry.label : undefined}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: '7px 10px',
-                      borderRadius: 6,
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      width: '100%',
-                      marginBottom: 1,
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '7px 10px', borderRadius: 6,
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      width: '100%', marginBottom: 1,
                     }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = 'transparent'
-                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                   >
-                    {/* Icon */}
                     <span style={{ flexShrink: 0, display: 'inline-flex', color: groupActive ? SIDEBAR.activeFg : SIDEBAR.iconInactive }}>
                       <entry.icon size={ICON_SIZE.nav} />
                     </span>
-                    {/* Label */}
                     <span
                       style={{
-                        flex: 1,
-                        fontSize: 12,
-                        fontWeight: 500,
+                        flex: 1, fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', textAlign: 'left',
                         color: groupActive ? SIDEBAR.activeFg : SIDEBAR.textInactive,
-                        whiteSpace: 'nowrap',
-                        textAlign: 'left',
-                        opacity: expanded ? 1 : 0,
-                        transition: 'opacity 0.15s ease',
+                        opacity: expanded ? 1 : 0, transition: 'opacity 0.15s ease',
                       }}
                     >
                       {entry.label}
                     </span>
-                    {/* Chevron — rotates 180° when open */}
                     <span
                       style={{
-                        display: 'inline-flex',
-                        flexShrink: 0,
-                        color: SIDEBAR.iconInactive,
+                        display: 'inline-flex', flexShrink: 0, color: SIDEBAR.iconInactive,
                         opacity: expanded ? 1 : 0,
                         transition: 'opacity 0.15s ease, transform 0.2s ease',
-                        transform: reportsOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                        transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
                       }}
                     >
                       <ChevronDown size={12} />
                     </span>
                   </button>
 
-                  {/* Children — max-height animation, only visible when sidebar is expanded */}
                   <div
                     style={{
-                      maxHeight: (reportsOpen && expanded) ? '300px' : '0',
+                      maxHeight: (isOpen && expanded) ? `${visChildren.length * 36 + 8}px` : '0',
                       overflow: 'hidden',
                       transition: 'max-height 0.2s ease',
                     }}
                   >
                     <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                      {entry.children.map((child, ci) => {
-                        // Disabled placeholder (Supplier Report, Batch Report)
-                        if (child.disabled) {
-                          return (
-                            <li key={`disabled-${ci}`}>
-                              <div
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 8,
-                                  padding: '6px 10px 6px 37px',
-                                  borderRadius: 6,
-                                  marginBottom: 1,
-                                  opacity: 0.45,
-                                  cursor: 'not-allowed',
-                                }}
-                              >
-                                <span style={{ fontSize: 12, fontWeight: 500, color: SIDEBAR.textInactive, whiteSpace: 'nowrap' }}>
-                                  {child.label}
-                                </span>
-                                <span style={{ fontSize: 9, color: SIDEBAR.textInactive, whiteSpace: 'nowrap' }}>
-                                  Soon
-                                </span>
-                              </div>
-                            </li>
-                          )
-                        }
-
-                        // Active child link — exact match to avoid Overview matching sub-routes
+                      {visChildren.map(child => {
                         const childActive = pathname === child.href
                         return (
                           <li key={child.href}>
@@ -273,28 +248,23 @@ export function AdminSidebar({ pharmacyName }: Props) {
                               href={child.href}
                               aria-current={childActive ? 'page' : undefined}
                               style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                padding: '6px 10px 6px 37px',
-                                borderRadius: 6,
-                                textDecoration: 'none',
+                                display: 'flex', alignItems: 'center',
+                                padding: '6px 10px 6px 37px', borderRadius: 6,
+                                textDecoration: 'none', marginBottom: 1,
                                 background: childActive ? SIDEBAR.activeBg : 'transparent',
                                 transition: 'background 0.15s ease',
-                                marginBottom: 1,
                               }}
-                              onMouseEnter={(e) => {
+                              onMouseEnter={e => {
                                 if (!childActive) (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg
                               }}
-                              onMouseLeave={(e) => {
+                              onMouseLeave={e => {
                                 if (!childActive) (e.currentTarget as HTMLElement).style.background = 'transparent'
                               }}
                             >
                               <span
                                 style={{
-                                  fontSize: 12,
-                                  fontWeight: 500,
+                                  fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
                                   color: childActive ? SIDEBAR.activeFg : SIDEBAR.textInactive,
-                                  whiteSpace: 'nowrap',
                                 }}
                               >
                                 {child.label}
@@ -310,7 +280,8 @@ export function AdminSidebar({ pharmacyName }: Props) {
             }
 
             // ── Regular nav item ─────────────────────────────────────────────
-            const { href, label, icon: Icon } = entry as NavItem
+            const { href, label, icon: Icon, permission } = entry as NavItem
+            if (permission !== null && !hasPermission(permissions, permission)) return null
             const active = pathname === href || pathname.startsWith(href + '/')
             return (
               <li key={`${href}-${i}`}>
@@ -319,20 +290,15 @@ export function AdminSidebar({ pharmacyName }: Props) {
                   title={!expanded ? label : undefined}
                   aria-current={active ? 'page' : undefined}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '7px 10px',
-                    borderRadius: 6,
-                    textDecoration: 'none',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '7px 10px', borderRadius: 6, textDecoration: 'none',
                     background: active ? SIDEBAR.activeBg : 'transparent',
-                    transition: 'background 0.15s ease',
-                    marginBottom: 1,
+                    transition: 'background 0.15s ease', marginBottom: 1,
                   }}
-                  onMouseEnter={(e) => {
+                  onMouseEnter={e => {
                     if (!active) (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg
                   }}
-                  onMouseLeave={(e) => {
+                  onMouseLeave={e => {
                     if (!active) (e.currentTarget as HTMLElement).style.background = 'transparent'
                   }}
                 >
@@ -341,12 +307,9 @@ export function AdminSidebar({ pharmacyName }: Props) {
                   </span>
                   <span
                     style={{
-                      fontSize: 12,
-                      fontWeight: 500,
+                      fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
                       color: active ? SIDEBAR.activeFg : SIDEBAR.textInactive,
-                      whiteSpace: 'nowrap',
-                      opacity: expanded ? 1 : 0,
-                      transition: 'opacity 0.15s ease',
+                      opacity: expanded ? 1 : 0, transition: 'opacity 0.15s ease',
                     }}
                   >
                     {label}
@@ -374,30 +337,19 @@ export function AdminSidebar({ pharmacyName }: Props) {
             type="submit"
             title={!expanded ? 'Sign Out' : undefined}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '7px 0px',
-              borderRadius: 6,
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              width: '100%',
+              display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0px',
+              borderRadius: 6, background: 'transparent', border: 'none', cursor: 'pointer', width: '100%',
             }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
           >
             <span style={{ flexShrink: 0, display: 'inline-flex', color: SIDEBAR.iconInactive }}>
               <LogOut size={ICON_SIZE.nav} />
             </span>
             <span
               style={{
-                fontSize: 12,
-                fontWeight: 500,
-                color: SIDEBAR.textInactive,
-                whiteSpace: 'nowrap',
-                opacity: expanded ? 1 : 0,
-                transition: 'opacity 0.15s ease',
+                fontSize: 12, fontWeight: 500, color: SIDEBAR.textInactive,
+                whiteSpace: 'nowrap', opacity: expanded ? 1 : 0, transition: 'opacity 0.15s ease',
               }}
             >
               Sign Out

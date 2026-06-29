@@ -2,26 +2,20 @@
 
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
-  UserCog,
-  Settings,
-  BarChart3,
-  Activity,
-  Pill,
   Package,
   Truck,
+  Users,
+  Calculator,
+  Activity,
+  BarChart3,
+  UserCog,
+  Settings,
   ClipboardList,
   LogOut,
-  BookOpen,
-  Building2,
-  Users,
-  ArrowLeftRight,
-  FileText,
-  Receipt,
-  Clock,
-  RotateCcw,
+  Pill,
   ChevronDown,
 } from 'lucide-react'
 import { signOut } from '@/app/actions/auth'
@@ -30,46 +24,87 @@ import { ICON_SIZE, SIDEBAR, BRAND } from '@/lib/design-tokens'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type GroupChild =
-  | { href: string;      label: string; disabled?: never }
-  | { href?: undefined;  label: string; disabled: true }
+  | { href: string;  label: string; disabled?: never }
+  | { href?: string; label: string; disabled: true }
 
 type NavEntry =
-  | { type: 'item';    href: string; label: string; icon: React.ComponentType<{ size?: number }> }
-  | { type: 'section'; label: string }
-  | { type: 'group';   label: string; icon: React.ComponentType<{ size?: number }>; children: GroupChild[] }
+  | { type: 'item';  href: string; label: string; icon: React.ComponentType<{ size?: number }> }
+  | { type: 'group'; label: string; icon: React.ComponentType<{ size?: number }>; children: GroupChild[] }
 
 // ─── Navigation data ──────────────────────────────────────────────────────────
 
 const NAV_ENTRIES: NavEntry[] = [
-  { type: 'item',    href: '/superadmin/dashboard',       label: 'Dashboard',       icon: LayoutDashboard },
-  { type: 'item',    href: '/superadmin/users',           label: 'Users',           icon: UserCog },
-  { type: 'item',    href: '/superadmin/medicines',       label: 'Medicines',       icon: Package },
-  { type: 'item',    href: '/superadmin/suppliers',       label: 'Suppliers',       icon: Truck },
-  { type: 'item',    href: '/superadmin/purchase-orders', label: 'Purchase Orders', icon: ClipboardList },
-  { type: 'section', label: 'Ledger' },
-  { type: 'item',    href: '/superadmin/ledger',          label: 'Overview',        icon: BookOpen },
-  { type: 'item',    href: '/superadmin/ledger/suppliers',label: 'Suppliers',           icon: Building2 },
-  { type: 'item',    href: '/superadmin/ledger/customers',label: 'Customers (Udhaar)', icon: Users },
-  { type: 'item',    href: '/superadmin/ledger/borrowing',label: 'Borrowing',       icon: ArrowLeftRight },
-  { type: 'item',    href: '/superadmin/ledger/cashbook', label: 'Cash Book',       icon: LayoutDashboard },
-  { type: 'item',    href: '/superadmin/ledger/journal',  label: 'Journal',         icon: FileText },
-  { type: 'item',    href: '/superadmin/expenses',        label: 'Expenses',        icon: Receipt },
-  { type: 'item',    href: '/superadmin/returns',         label: 'Returns',         icon: RotateCcw },
-  { type: 'item',    href: '/superadmin/shifts',          label: 'Shifts',          icon: Clock },
+  { type: 'item', href: '/superadmin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   {
-    type: 'group',
-    label: 'Reports',
-    icon: BarChart3,
+    type: 'group', label: 'Medicines & Stock', icon: Package,
+    children: [
+      { href: '/superadmin/medicines',       label: 'Medicines' },
+      { href: '/superadmin/purchase-orders', label: 'Purchase Orders' },
+    ],
+  },
+  {
+    type: 'group', label: 'Suppliers', icon: Truck,
+    children: [
+      { href: '/superadmin/suppliers',        label: 'Supplier List' },
+      { href: '/superadmin/ledger/suppliers', label: 'Supplier Ledger' },
+    ],
+  },
+  {
+    type: 'group', label: 'Customers', icon: Users,
+    children: [
+      { href: '/superadmin/ledger/customers', label: 'Customers (Udhaar)' },
+      { href: '/superadmin/ledger/borrowing', label: 'Borrowing' },
+    ],
+  },
+  {
+    type: 'group', label: 'Accounting', icon: Calculator,
+    children: [
+      { href: '/superadmin/ledger',               label: 'Overview (P&L)' },
+      { disabled: true,                            label: 'Balance Sheet' },
+      { disabled: true,                            label: 'Trial Balance' },
+      { href: '/superadmin/ledger/cashbook',       label: 'Cash Book' },
+      { href: '/superadmin/ledger/journal',        label: 'Journal' },
+      { href: '/superadmin/opening-balances',      label: 'Opening Balances' },
+      { href: '/superadmin/expenses',              label: 'Expenses' },
+    ],
+  },
+  {
+    type: 'group', label: 'Operations', icon: Activity,
+    children: [
+      { href: '/superadmin/returns', label: 'Returns' },
+      { href: '/superadmin/shifts',  label: 'Shifts' },
+    ],
+  },
+  {
+    type: 'group', label: 'Reports', icon: BarChart3,
     children: [
       { href: '/superadmin/reports',             label: 'Overview' },
       { href: '/superadmin/reports/item-detail', label: 'Item Detail' },
-      { label: 'Supplier Report',                disabled: true },
-      { label: 'Batch Report',                   disabled: true },
+      { disabled: true,                           label: 'Supplier Report' },
+      { disabled: true,                           label: 'Batch Report' },
     ],
   },
-  { type: 'item',    href: '/superadmin/settings',        label: 'Settings',        icon: Settings },
-  { type: 'item',    href: '/superadmin/audit',           label: 'Audit Trail',     icon: Activity },
+  {
+    type: 'group', label: 'User Management', icon: UserCog,
+    children: [
+      { href: '/superadmin/users', label: 'Users & Roles' },
+    ],
+  },
+  { type: 'item', href: '/superadmin/settings', label: 'Settings',    icon: Settings },
+  { type: 'item', href: '/superadmin/audit',     label: 'Audit Trail', icon: ClipboardList },
 ]
+
+const SA_STORAGE_KEY = 'sidebar_superadmin_groups'
+
+function getActiveGroupSA(pathname: string): string | null {
+  for (const entry of NAV_ENTRIES) {
+    if (entry.type !== 'group') continue
+    if (entry.children.some(child => !child.disabled && child.href === pathname)) {
+      return entry.label
+    }
+  }
+  return null
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -79,39 +114,31 @@ interface Props {
 
 export function SuperadminSidebar({ pharmacyName }: Props) {
   const pathname = usePathname()
-  const router   = useRouter()
-  const [expanded,     setExpanded]     = useState(false)
-  const [reportsOpen,  setReportsOpen]  = useState(false)
+  const [expanded,   setExpanded]   = useState(false)
+  const [groupsOpen, setGroupsOpen] = useState<Record<string, boolean>>({})
 
-  // Restore group state from localStorage on mount (avoids hydration mismatch
-  // by not reading storage during SSR — useState(false) is the server value).
   useEffect(() => {
+    let stored: Record<string, boolean> = {}
     try {
-      const stored = localStorage.getItem('sidebar_reports_expanded')
-      if (stored === 'true') setReportsOpen(true)
-    } catch {
-      // localStorage unavailable (e.g. private browsing with blocked storage)
-    }
-  }, [])
+      const raw = localStorage.getItem(SA_STORAGE_KEY)
+      if (raw) stored = JSON.parse(raw) as Record<string, boolean>
+    } catch {}
+    const active = getActiveGroupSA(pathname)
+    if (active) stored = { ...stored, [active]: true }
+    setGroupsOpen(stored)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-expand when the current route is inside /superadmin/reports.
   useEffect(() => {
-    if (pathname.startsWith('/superadmin/reports')) {
-      setReportsOpen(true)
-    }
+    const active = getActiveGroupSA(pathname)
+    if (active) setGroupsOpen(prev => ({ ...prev, [active]: true }))
   }, [pathname])
 
-  function toggleReports() {
-    setReportsOpen(prev => {
-      const next = !prev
-      try { localStorage.setItem('sidebar_reports_expanded', String(next)) } catch {}
+  function toggleGroup(label: string) {
+    setGroupsOpen(prev => {
+      const next = { ...prev, [label]: !prev[label] }
+      try { localStorage.setItem(SA_STORAGE_KEY, JSON.stringify(next)) } catch {}
       return next
     })
-  }
-
-  function handleReportsClick() {
-    toggleReports()
-    router.push('/superadmin/reports')
   }
 
   return (
@@ -157,140 +184,83 @@ export function SuperadminSidebar({ pharmacyName }: Props) {
         <ul style={{ listStyle: 'none', margin: 0, padding: '0 6px' }}>
           {NAV_ENTRIES.map((entry, i) => {
 
-            // ── Section separator ────────────────────────────────────────────
-            if (entry.type === 'section') {
-              return (
-                <li key={`section-${i}`} style={{ marginTop: 8, marginBottom: 2 }}>
-                  <span
-                    style={{
-                      display: 'block',
-                      fontSize: 9,
-                      fontWeight: 600,
-                      letterSpacing: '0.09em',
-                      textTransform: 'uppercase',
-                      color: SIDEBAR.sectionLabel,
-                      padding: '2px 10px',
-                      opacity: expanded ? 1 : 0,
-                      transition: 'opacity 0.15s ease',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {entry.label}
-                  </span>
-                  <div
-                    style={{
-                      height: 1,
-                      background: 'rgba(255,255,255,0.08)',
-                      margin: '2px 10px',
-                      opacity: expanded ? 0 : 1,
-                      transition: 'opacity 0.15s ease',
-                    }}
-                  />
-                </li>
-              )
-            }
-
-            // ── Collapsible group (Reports) ───────────────────────────────────
+            // ── Collapsible group ────────────────────────────────────────────
             if (entry.type === 'group') {
-              const groupActive = pathname.startsWith('/superadmin/reports')
+              const isOpen      = !!groupsOpen[entry.label]
+              const groupActive = entry.children.some(c => !c.disabled && c.href === pathname)
               return (
                 <li key={`group-${entry.label}`}>
-                  {/* Parent row — toggles open/closed AND navigates to overview */}
                   <button
                     type="button"
-                    onClick={handleReportsClick}
+                    onClick={() => toggleGroup(entry.label)}
                     title={!expanded ? entry.label : undefined}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: '7px 10px',
-                      borderRadius: 6,
-                      background: 'transparent',
-                      border: 'none',
-                      cursor: 'pointer',
-                      width: '100%',
-                      marginBottom: 1,
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '7px 10px', borderRadius: 6,
+                      background: 'transparent', border: 'none', cursor: 'pointer',
+                      width: '100%', marginBottom: 1,
                     }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.background = 'transparent'
-                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                   >
-                    {/* Icon */}
                     <span style={{ flexShrink: 0, display: 'inline-flex', color: groupActive ? SIDEBAR.activeFg : SIDEBAR.iconInactive }}>
                       <entry.icon size={ICON_SIZE.nav} />
                     </span>
-                    {/* Label */}
                     <span
                       style={{
-                        flex: 1,
-                        fontSize: 12,
-                        fontWeight: 500,
+                        flex: 1, fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', textAlign: 'left',
                         color: groupActive ? SIDEBAR.activeFg : SIDEBAR.textInactive,
-                        whiteSpace: 'nowrap',
-                        textAlign: 'left',
-                        opacity: expanded ? 1 : 0,
-                        transition: 'opacity 0.15s ease',
+                        opacity: expanded ? 1 : 0, transition: 'opacity 0.15s ease',
                       }}
                     >
                       {entry.label}
                     </span>
-                    {/* Chevron — rotates 180° when open */}
                     <span
                       style={{
-                        display: 'inline-flex',
-                        flexShrink: 0,
-                        color: SIDEBAR.iconInactive,
+                        display: 'inline-flex', flexShrink: 0, color: SIDEBAR.iconInactive,
                         opacity: expanded ? 1 : 0,
                         transition: 'opacity 0.15s ease, transform 0.2s ease',
-                        transform: reportsOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                        transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
                       }}
                     >
                       <ChevronDown size={12} />
                     </span>
                   </button>
 
-                  {/* Children — max-height animation, only visible when sidebar is expanded */}
                   <div
                     style={{
-                      maxHeight: (reportsOpen && expanded) ? '300px' : '0',
+                      maxHeight: (isOpen && expanded) ? `${entry.children.length * 36 + 8}px` : '0',
                       overflow: 'hidden',
                       transition: 'max-height 0.2s ease',
                     }}
                   >
                     <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                       {entry.children.map((child, ci) => {
-                        // Disabled placeholder (Supplier Report, Batch Report)
                         if (child.disabled) {
                           return (
-                            <li key={`disabled-${ci}`}>
+                            <li key={`disabled-${entry.label}-${ci}`}>
                               <div
                                 style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 8,
-                                  padding: '6px 10px 6px 37px',
-                                  borderRadius: 6,
-                                  marginBottom: 1,
-                                  opacity: 0.45,
-                                  cursor: 'not-allowed',
+                                  display: 'flex', alignItems: 'center',
+                                  padding: '6px 10px 6px 37px', borderRadius: 6, marginBottom: 1,
                                 }}
                               >
-                                <span style={{ fontSize: 12, fontWeight: 500, color: SIDEBAR.textInactive, whiteSpace: 'nowrap' }}>
+                                <span style={{ fontSize: 12, fontWeight: 500, color: '#9CA3AF', whiteSpace: 'nowrap' }}>
                                   {child.label}
                                 </span>
-                                <span style={{ fontSize: 9, color: SIDEBAR.textInactive, whiteSpace: 'nowrap' }}>
+                                <span
+                                  style={{
+                                    fontSize: 9, background: '#F3F4F6', color: '#9CA3AF',
+                                    border: '1px solid #E5E7EB', borderRadius: 3,
+                                    padding: '1px 5px', marginLeft: 6, whiteSpace: 'nowrap',
+                                  }}
+                                >
                                   Soon
                                 </span>
                               </div>
                             </li>
                           )
                         }
-
-                        // Active child link — exact match to avoid Overview matching sub-routes
                         const childActive = pathname === child.href
                         return (
                           <li key={child.href}>
@@ -298,28 +268,23 @@ export function SuperadminSidebar({ pharmacyName }: Props) {
                               href={child.href}
                               aria-current={childActive ? 'page' : undefined}
                               style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                padding: '6px 10px 6px 37px',
-                                borderRadius: 6,
-                                textDecoration: 'none',
+                                display: 'flex', alignItems: 'center',
+                                padding: '6px 10px 6px 37px', borderRadius: 6,
+                                textDecoration: 'none', marginBottom: 1,
                                 background: childActive ? SIDEBAR.activeBg : 'transparent',
                                 transition: 'background 0.15s ease',
-                                marginBottom: 1,
                               }}
-                              onMouseEnter={(e) => {
+                              onMouseEnter={e => {
                                 if (!childActive) (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg
                               }}
-                              onMouseLeave={(e) => {
+                              onMouseLeave={e => {
                                 if (!childActive) (e.currentTarget as HTMLElement).style.background = 'transparent'
                               }}
                             >
                               <span
                                 style={{
-                                  fontSize: 12,
-                                  fontWeight: 500,
+                                  fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
                                   color: childActive ? SIDEBAR.activeFg : SIDEBAR.textInactive,
-                                  whiteSpace: 'nowrap',
                                 }}
                               >
                                 {child.label}
@@ -335,7 +300,7 @@ export function SuperadminSidebar({ pharmacyName }: Props) {
             }
 
             // ── Regular nav item ─────────────────────────────────────────────
-            const active = pathname === entry.href || pathname.startsWith(entry.href + '/')
+            const active = pathname === entry.href
             return (
               <li key={entry.href}>
                 <Link
@@ -343,20 +308,15 @@ export function SuperadminSidebar({ pharmacyName }: Props) {
                   title={!expanded ? entry.label : undefined}
                   aria-current={active ? 'page' : undefined}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '7px 10px',
-                    borderRadius: 6,
-                    textDecoration: 'none',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '7px 10px', borderRadius: 6, textDecoration: 'none',
                     background: active ? SIDEBAR.activeBg : 'transparent',
-                    transition: 'background 0.15s ease',
-                    marginBottom: 1,
+                    transition: 'background 0.15s ease', marginBottom: 1,
                   }}
-                  onMouseEnter={(e) => {
+                  onMouseEnter={e => {
                     if (!active) (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg
                   }}
-                  onMouseLeave={(e) => {
+                  onMouseLeave={e => {
                     if (!active) (e.currentTarget as HTMLElement).style.background = 'transparent'
                   }}
                 >
@@ -365,12 +325,9 @@ export function SuperadminSidebar({ pharmacyName }: Props) {
                   </span>
                   <span
                     style={{
-                      fontSize: 12,
-                      fontWeight: 500,
+                      fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
                       color: active ? SIDEBAR.activeFg : SIDEBAR.textInactive,
-                      whiteSpace: 'nowrap',
-                      opacity: expanded ? 1 : 0,
-                      transition: 'opacity 0.15s ease',
+                      opacity: expanded ? 1 : 0, transition: 'opacity 0.15s ease',
                     }}
                   >
                     {entry.label}
@@ -398,30 +355,19 @@ export function SuperadminSidebar({ pharmacyName }: Props) {
             type="submit"
             title={!expanded ? 'Sign Out' : undefined}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              padding: '7px 0px',
-              borderRadius: 6,
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              width: '100%',
+              display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0px',
+              borderRadius: 6, background: 'transparent', border: 'none', cursor: 'pointer', width: '100%',
             }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = SIDEBAR.hoverBg }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
           >
             <span style={{ flexShrink: 0, display: 'inline-flex', color: SIDEBAR.iconInactive }}>
               <LogOut size={ICON_SIZE.nav} />
             </span>
             <span
               style={{
-                fontSize: 12,
-                fontWeight: 500,
-                color: SIDEBAR.textInactive,
-                whiteSpace: 'nowrap',
-                opacity: expanded ? 1 : 0,
-                transition: 'opacity 0.15s ease',
+                fontSize: 12, fontWeight: 500, color: SIDEBAR.textInactive,
+                whiteSpace: 'nowrap', opacity: expanded ? 1 : 0, transition: 'opacity 0.15s ease',
               }}
             >
               Sign Out

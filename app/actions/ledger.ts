@@ -442,10 +442,11 @@ export async function reverseJournalEntry(
 
 // ─── 7. recordSupplierPayment ─────────────────────────────────────────────────
 // superadmin only.
-// Records a cash payment to a supplier:
+// Records a payment to a supplier:
 //   DEBIT  2000 Accounts Payable  amount  [party: supplier]
-//   CREDIT 1000 Cash              amount
-// Inserts into supplier_payments with back-reference to the journal entry.
+//   CREDIT 1000 Cash / 1001 Bank  amount  (routed by payment_method)
+// Inserts payment row first (gets its ID), then posts journal entry with
+// p_reference_id=paymentId so the journal entry FK back to payment is populated.
 
 export async function recordSupplierPayment(input: {
   supplier_id:    string
@@ -473,12 +474,34 @@ export async function recordSupplierPayment(input: {
     .maybeSingle()
   if (!supplier) return { error: 'Supplier not found' }
 
-  // Post journal entry: Debit AP, Credit Cash
+  // Route payment to correct account: cash→1000, bank/cheque→1001
+  const creditAccount =
+    payment_method === 'bank_transfer' ? '1001' :
+    payment_method === 'cheque'        ? '1001' : '1000'
+
+  // Insert payment record first so its ID can be threaded as p_reference_id
+  const { data: payment, error: insertError } = await supabase
+    .from('supplier_payments')
+    .insert({
+      supplier_id,
+      amount,
+      payment_date,
+      payment_method,
+      reference_no: reference_no ?? null,
+      notes:        notes ?? null,
+      created_by:   user.id,
+    })
+    .select('id')
+    .single()
+
+  if (insertError || !payment) return { error: insertError?.message ?? 'Failed to save payment record' }
+
+  // Post journal entry: Debit AP, Credit payment account
   const { data: journalEntryId, error: rpcError } = await supabase.rpc('post_journal_entry', {
     p_entry_date:     payment_date,
     p_description:    `Payment to ${supplier.name}${reference_no ? ` (${reference_no})` : ''}`,
     p_reference_type: 'supplier_payment',
-    p_reference_id:   null,          // updated after insert below
+    p_reference_id:   payment.id,
     p_currency:       'PKR',
     p_exchange_rate:  1.0,
     p_lines: [
@@ -491,10 +514,10 @@ export async function recordSupplierPayment(input: {
         description:  `AP reduction — ${supplier.name}`,
       },
       {
-        account_code: '1000',
+        account_code: creditAccount,
         direction:    'credit',
         amount:       amount.toString(),
-        description:  `Cash paid to ${supplier.name}`,
+        description:  `Payment to ${supplier.name}`,
       },
     ],
     p_created_by: user.id,
@@ -502,23 +525,16 @@ export async function recordSupplierPayment(input: {
 
   if (rpcError || !journalEntryId) return { error: rpcError?.message ?? 'Failed to post journal entry' }
 
-  // Insert payment record with journal back-reference
-  const { data: payment, error: insertError } = await supabase
+  // Link journal entry back to the payment record
+  const { error: linkError } = await supabase
     .from('supplier_payments')
-    .insert({
-      supplier_id,
-      amount,
-      payment_date,
-      payment_method,
-      reference_no:     reference_no ?? null,
-      notes:            notes ?? null,
-      journal_entry_id: journalEntryId as string,
-      created_by:       user.id,
-    })
-    .select('id')
-    .single()
+    .update({ journal_entry_id: journalEntryId as string })
+    .eq('id', payment.id)
 
-  if (insertError || !payment) return { error: insertError?.message ?? 'Failed to save payment record' }
+  if (linkError) {
+    console.error('[recordSupplierPayment] journal_entry_id link failed:', linkError.message,
+      '| payment_id:', payment.id, '| je_id:', journalEntryId)
+  }
 
   await logAction({
     supabase, userId: user.id, userRole: role,
@@ -536,13 +552,15 @@ export async function recordSupplierPayment(input: {
 // ─── 8. recordCustomerPayment ─────────────────────────────────────────────────
 // superadmin only.
 // Records an udhaar collection from a customer:
-//   DEBIT  1000 Cash                    amount
+//   DEBIT  1000 Cash / 1001 Bank        amount  (routed by payment_method)
 //   CREDIT 1100 Accounts Receivable     amount  [party: customer]
-// Inserts into customer_payments and DECREMENTS customers.credit_balance.
+// Inserts payment row first (gets its ID), then posts journal entry with
+// p_reference_id=paymentId. Then decrements customers.credit_balance.
 //
 // Note: journal entry and credit_balance decrement are separate operations.
-// If the credit_balance update fails, the journal entry still stands — this
-// is a known limitation. Phase 7B+ should move this into an atomic RPC.
+// Full atomicity requires migration 033 (record_customer_payment RPC).
+// If credit_balance update fails, an error is returned so the caller can alert
+// the user — the payment row and journal entry are already committed.
 
 export async function recordCustomerPayment(input: {
   customer_id:    string
@@ -577,17 +595,38 @@ export async function recordCustomerPayment(input: {
     }
   }
 
-  // Post journal entry: Debit Cash, Credit AR
+  // Route payment to correct account: cash→1000, bank/cheque→1001
+  const debitAccount =
+    payment_method === 'bank_transfer' ? '1001' :
+    payment_method === 'cheque'        ? '1001' : '1000'
+
+  // Insert payment record first so its ID can be threaded as p_reference_id
+  const { data: payment, error: insertError } = await supabase
+    .from('customer_payments')
+    .insert({
+      customer_id,
+      amount,
+      payment_date,
+      payment_method: payment_method ?? 'cash',
+      notes:          notes ?? null,
+      created_by:     user.id,
+    })
+    .select('id')
+    .single()
+
+  if (insertError || !payment) return { error: insertError?.message ?? 'Failed to save payment record' }
+
+  // Post journal entry: Debit payment account, Credit AR
   const { data: journalEntryId, error: rpcError } = await supabase.rpc('post_journal_entry', {
     p_entry_date:     payment_date,
     p_description:    `Udhaar collection from ${customer.name}`,
     p_reference_type: 'customer_payment',
-    p_reference_id:   null,
+    p_reference_id:   payment.id,
     p_currency:       'PKR',
     p_exchange_rate:  1.0,
     p_lines: [
       {
-        account_code: '1000',
+        account_code: debitAccount,
         direction:    'debit',
         amount:       amount.toString(),
         description:  `Cash received from ${customer.name}`,
@@ -606,22 +645,16 @@ export async function recordCustomerPayment(input: {
 
   if (rpcError || !journalEntryId) return { error: rpcError?.message ?? 'Failed to post journal entry' }
 
-  // Insert payment record
-  const { data: payment, error: insertError } = await supabase
+  // Link journal entry back to the payment record
+  const { error: linkError } = await supabase
     .from('customer_payments')
-    .insert({
-      customer_id,
-      amount,
-      payment_date,
-      payment_method: payment_method ?? 'cash',
-      notes:          notes ?? null,
-      journal_entry_id: journalEntryId as string,
-      created_by:     user.id,
-    })
-    .select('id')
-    .single()
+    .update({ journal_entry_id: journalEntryId as string })
+    .eq('id', payment.id)
 
-  if (insertError || !payment) return { error: insertError?.message ?? 'Failed to save payment record' }
+  if (linkError) {
+    console.error('[recordCustomerPayment] journal_entry_id link failed:', linkError.message,
+      '| payment_id:', payment.id, '| je_id:', journalEntryId)
+  }
 
   // Decrement customer's denormalized credit balance
   const { error: balanceError } = await supabase
@@ -633,9 +666,11 @@ export async function recordCustomerPayment(input: {
     .eq('id', customer_id)
 
   if (balanceError) {
-    // Log but do not fail — journal entry is already committed
     console.error('[recordCustomerPayment] credit_balance update failed:', balanceError.message,
-      '| customer_id:', customer_id)
+      '| payment_id:', payment.id, '| amount:', amount)
+    return {
+      error: `Payment recorded but customer balance update failed. Please contact support. Payment ID: ${payment.id}`,
+    }
   }
 
   await logAction({
@@ -1073,4 +1108,102 @@ export async function postDraftJournalEntry(
 
   LEDGER_PATHS.forEach(p => revalidatePath(p))
   return { error: null }
+}
+
+// ─── 15. postOpeningBalances ──────────────────────────────────────────────────
+// superadmin only.
+// Posts a single 'opening_balance' journal entry to establish starting balances.
+// Can only be done once — if an entry already exists, returns an error.
+// Callers must void the existing entry before re-posting.
+// Balance enforcement is delegated to post_journal_entry() RPC.
+
+interface OpeningBalanceLine {
+  accountCode: string
+  amount:      number
+  direction:   'debit' | 'credit'
+  description: string
+}
+
+export async function postOpeningBalances(
+  lines:     OpeningBalanceLine[],
+  asOfDate:  string,
+  notes:     string,
+): Promise<{ data: { journalEntryId: string } | null; error: string | null }> {
+  const { supabase, user, role } = await getCallerContext()
+  if (!user || !role)        return { data: null, error: 'Not authenticated' }
+  if (role !== 'superadmin') return { data: null, error: 'Only superadmin can post opening balances' }
+
+  // Validate lines
+  if (!lines || lines.length === 0) {
+    return { data: null, error: 'At least one line is required' }
+  }
+  for (const line of lines) {
+    if (line.amount <= 0) {
+      return { data: null, error: `Amount must be positive for account ${line.accountCode}` }
+    }
+  }
+
+  // Validate date
+  const parsedDate = new Date(asOfDate)
+  if (isNaN(parsedDate.getTime())) {
+    return { data: null, error: 'Invalid date' }
+  }
+  const today = new Date().toISOString().split('T')[0]
+  if (asOfDate > today) {
+    return { data: null, error: 'As-of date cannot be in the future' }
+  }
+
+  // Check for existing opening balance entry
+  const { data: existing } = await supabase
+    .from('journal_entries')
+    .select('id, entry_date')
+    .eq('reference_type', 'opening_balance')
+    .limit(1)
+    .maybeSingle()
+
+  if (existing) {
+    return {
+      data: null,
+      error: `Opening balances have already been posted on ${existing.entry_date}. To re-enter, void the existing entry first.`,
+    }
+  }
+
+  // Map to snake_case for RPC
+  const mappedLines = lines.map(l => ({
+    account_code: l.accountCode,
+    direction:    l.direction,
+    amount:       l.amount.toString(),
+    description:  l.description || 'Opening balance',
+  }))
+
+  const description = notes?.trim()
+    ? `Opening balances: ${notes.trim()}`
+    : 'Opening balances'
+
+  const { data: journalEntryId, error: rpcError } = await supabase.rpc('post_journal_entry', {
+    p_entry_date:     asOfDate,
+    p_description:    description,
+    p_reference_type: 'opening_balance',
+    p_reference_id:   null,
+    p_currency:       'PKR',
+    p_exchange_rate:  1.0,
+    p_lines:          mappedLines,
+    p_created_by:     user.id,
+  })
+
+  if (rpcError || !journalEntryId) {
+    return { data: null, error: rpcError?.message ?? 'Failed to post opening balances' }
+  }
+
+  await logAction({
+    supabase, userId: user.id, userRole: role,
+    action:    ACTION_TYPES.MANUAL_JOURNAL_ENTRY,
+    tableName: 'journal_entries',
+    recordId:  journalEntryId as string,
+    newValue:  { opening_balances_posted: true, asOfDate },
+  })
+
+  LEDGER_PATHS.forEach(p => revalidatePath(p))
+  revalidatePath('/superadmin/opening-balances')
+  return { data: { journalEntryId: journalEntryId as string }, error: null }
 }

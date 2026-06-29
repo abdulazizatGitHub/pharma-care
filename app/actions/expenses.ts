@@ -135,7 +135,11 @@ export async function recordExpense(input: {
     return { error: insertErr?.message ?? 'Failed to create expense record' }
   }
 
-  // Step 2: Post journal entry — DEBIT expense account, CREDIT Cash (1000)
+  // Step 2: Post journal entry — DEBIT expense account, CREDIT payment account
+  const creditAccount =
+    payment_method === 'bank_transfer' ? '1001' :
+    payment_method === 'cheque'        ? '1001' : '1000'
+
   const { data: journalEntryId, error: rpcError } = await supabase.rpc('post_journal_entry', {
     p_entry_date:     expense_date,
     p_description:    `${account.name}: ${description}`,
@@ -151,7 +155,7 @@ export async function recordExpense(input: {
         description:  description,
       },
       {
-        account_code: '1000',
+        account_code: creditAccount,
         direction:    'credit',
         amount:       amount.toString(),
         description:  `Cash paid — ${account.name}`,
