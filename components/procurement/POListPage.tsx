@@ -14,12 +14,20 @@ import type { POListRow } from './POTable'
 import type { Supplier } from '@/lib/db-types'
 
 interface POListPageProps {
-  pos:       POListRow[]
-  suppliers: Supplier[]
-  basePath:  string
+  pos:               POListRow[]
+  suppliers:         Supplier[]
+  basePath:          string
+  currentPage:       number
+  totalCount:        number
+  pageSize:          number
+  defaultStatus:     string
+  defaultSupplierId: string
 }
 
-export function POListPage({ pos, suppliers, basePath }: POListPageProps) {
+export function POListPage({
+  pos, suppliers, basePath,
+  currentPage, totalCount, pageSize, defaultStatus, defaultSupplierId,
+}: POListPageProps) {
   const router = useRouter()
   const { role, permissions } = useDashboardUser()
 
@@ -32,14 +40,6 @@ export function POListPage({ pos, suppliers, basePath }: POListPageProps) {
   const [isPending,    startTransition] = useTransition()
 
   const supplierDropdown = suppliers.map(s => ({ id: s.id, name: s.name }))
-
-  // pending_approval POs shown at top for superadmin
-  const pendingFirst = role === 'superadmin'
-    ? [
-        ...pos.filter(p => p.status === 'pending_approval'),
-        ...pos.filter(p => p.status !== 'pending_approval'),
-      ]
-    : pos
 
   function handleCreate() {
     setCreateError(null)
@@ -64,7 +64,7 @@ export function POListPage({ pos, suppliers, basePath }: POListPageProps) {
             Purchase Orders
           </h1>
           <p style={{ fontSize: FONT.pageSubhead, color: TEXT.secondary, margin: '2px 0 0' }}>
-            {pos.length} order{pos.length !== 1 ? 's' : ''} total
+            {totalCount} order{totalCount !== 1 ? 's' : ''} total
           </p>
         </div>
         {canWrite && (
@@ -144,11 +144,16 @@ export function POListPage({ pos, suppliers, basePath }: POListPageProps) {
       {/* Table */}
       <div style={{ background: PAGE.surface, borderRadius: 10, padding: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <POTable
-          pos={pendingFirst}
+          pos={pos}
           suppliers={supplierDropdown}
           basePath={basePath}
           canWrite={canWrite}
           isSuperAdmin={role === 'superadmin'}
+          currentPage={currentPage}
+          totalCount={totalCount}
+          pageSize={pageSize}
+          defaultStatus={defaultStatus}
+          defaultSupplierId={defaultSupplierId}
         />
       </div>
     </div>

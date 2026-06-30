@@ -12,12 +12,20 @@ import { hasPermission }      from '@/lib/permissions'
 import type { ExpenseRow, ExpenseSummary } from '@/app/actions/expenses'
 
 interface Props {
-  expenses:   ExpenseRow[]
-  summary:    ExpenseSummary | null
-  monthLabel: string
+  expenses:           ExpenseRow[]
+  summary:            ExpenseSummary | null
+  monthLabel:         string
+  total:              number
+  currentPage:        number
+  pageSize:           number
+  defaultSearch:      string
+  defaultAccountCode: string
 }
 
-export function ExpensesPage({ expenses, summary, monthLabel }: Props) {
+export function ExpensesPage({
+  expenses, summary, monthLabel,
+  total, currentPage, pageSize, defaultSearch, defaultAccountCode,
+}: Props) {
   const { role, permissions } = useDashboardUser()
   const isSuperadmin = role === 'superadmin'
   const canWrite     = isSuperadmin || hasPermission(permissions, 'expenses')
@@ -68,6 +76,11 @@ export function ExpensesPage({ expenses, summary, monthLabel }: Props) {
         expenses={expenses}
         isSuperadmin={isSuperadmin}
         onVoidAndReRecord={handleVoidAndReRecord}
+        currentPage={currentPage}
+        total={total}
+        pageSize={pageSize}
+        defaultSearch={defaultSearch}
+        defaultAccountCode={defaultAccountCode}
       />
 
       {/* Record modal */}

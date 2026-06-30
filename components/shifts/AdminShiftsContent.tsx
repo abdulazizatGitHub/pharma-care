@@ -1,10 +1,11 @@
 'use client'
 
-import React, { useState, useTransition } from 'react'
+import React, { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Pagination } from '@/components/ui/Pagination'
 import { ShiftHistoryTable } from './ShiftHistoryTable'
 import { ShiftDetailPanel } from './ShiftDetailPanel'
-import { getShiftHistory } from '@/app/actions/shifts'
 import type { ShiftRow } from '@/app/actions/shifts'
 
 interface PharmacistOption {
@@ -13,37 +14,53 @@ interface PharmacistOption {
 }
 
 interface Props {
-  initialHistory:    ShiftRow[]
-  pharmacistOptions: PharmacistOption[]
+  shifts:              ShiftRow[]
+  pharmacistOptions:   PharmacistOption[]
+  currentPage:         number
+  totalCount:          number
+  pageSize:            number
+  defaultPharmacistId: string
+  defaultDateFrom:     string
+  defaultDateTo:       string
 }
 
-export function AdminShiftsContent({ initialHistory, pharmacistOptions }: Props) {
-  const [history,       setHistory]       = useState<ShiftRow[]>(initialHistory)
-  const [selectedShift, setSelectedShift] = useState<ShiftRow | null>(null)
-  const [pharmacistId,  setPharmacistId]  = useState('')
-  const [dateFrom,      setDateFrom]      = useState('')
-  const [dateTo,        setDateTo]        = useState('')
-  const [isPending,     startTransition]  = useTransition()
+export function AdminShiftsContent({
+  shifts,
+  pharmacistOptions,
+  currentPage,
+  totalCount,
+  pageSize,
+  defaultPharmacistId,
+  defaultDateFrom,
+  defaultDateTo,
+}: Props) {
+  const router = useRouter()
+
+  const [selectedShift,    setSelectedShift]    = useState<ShiftRow | null>(null)
+  const [localPharmacist,  setLocalPharmacist]  = useState(defaultPharmacistId)
+  const [localDateFrom,    setLocalDateFrom]     = useState(defaultDateFrom)
+  const [localDateTo,      setLocalDateTo]       = useState(defaultDateTo)
+
+  const totalPages = Math.ceil(totalCount / pageSize)
+
+  function pushUrl(overrides: Record<string, string>) {
+    const params = new URLSearchParams(window.location.search)
+    for (const [k, v] of Object.entries(overrides)) {
+      if (v) params.set(k, v)
+      else   params.delete(k)
+    }
+    router.push('?' + params.toString())
+  }
 
   function applyFilter() {
-    startTransition(async () => {
-      const result = await getShiftHistory(
-        pharmacistId || undefined,
-        dateFrom || undefined,
-        dateTo || undefined,
-      )
-      setHistory(result.data ?? [])
-    })
+    pushUrl({ pharmacist: localPharmacist, from: localDateFrom, to: localDateTo, page: '' })
   }
 
   function clearFilter() {
-    setPharmacistId('')
-    setDateFrom('')
-    setDateTo('')
-    startTransition(async () => {
-      const result = await getShiftHistory()
-      setHistory(result.data ?? [])
-    })
+    setLocalPharmacist('')
+    setLocalDateFrom('')
+    setLocalDateTo('')
+    pushUrl({ pharmacist: '', from: '', to: '', page: '' })
   }
 
   return (
@@ -61,8 +78,8 @@ export function AdminShiftsContent({ initialHistory, pharmacistOptions }: Props)
         <div>
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>Pharmacist</label>
           <select
-            value={pharmacistId}
-            onChange={e => setPharmacistId(e.target.value)}
+            value={localPharmacist}
+            onChange={e => setLocalPharmacist(e.target.value)}
             style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 6, minWidth: 160 }}
           >
             <option value="">All pharmacists</option>
@@ -76,8 +93,8 @@ export function AdminShiftsContent({ initialHistory, pharmacistOptions }: Props)
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>From</label>
           <input
             type="date"
-            value={dateFrom}
-            onChange={e => setDateFrom(e.target.value)}
+            value={localDateFrom}
+            onChange={e => setLocalDateFrom(e.target.value)}
             style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 6 }}
           />
         </div>
@@ -86,23 +103,21 @@ export function AdminShiftsContent({ initialHistory, pharmacistOptions }: Props)
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#6b7280', marginBottom: 4 }}>To</label>
           <input
             type="date"
-            value={dateTo}
-            onChange={e => setDateTo(e.target.value)}
+            value={localDateTo}
+            onChange={e => setLocalDateTo(e.target.value)}
             style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 6 }}
           />
         </div>
 
         <button
           onClick={applyFilter}
-          disabled={isPending}
           style={{ padding: '6px 16px', fontSize: 13, fontWeight: 600, background: '#0f766e', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
         >
-          {isPending ? 'Filtering…' : 'Apply'}
+          Apply
         </button>
 
         <button
           onClick={clearFilter}
-          disabled={isPending}
           style={{ padding: '6px 12px', fontSize: 13, color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, cursor: 'pointer' }}
         >
           Clear
@@ -120,12 +135,20 @@ export function AdminShiftsContent({ initialHistory, pharmacistOptions }: Props)
             <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#111827' }}>Shift History</p>
             <p style={{ margin: '2px 0 0', fontSize: 12, color: '#6b7280' }}>Click a row to view full details</p>
           </div>
-          <span style={{ fontSize: 12, color: '#6b7280' }}>{history.length} shift{history.length !== 1 ? 's' : ''}</span>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>{totalCount} shift{totalCount !== 1 ? 's' : ''}</span>
         </div>
         <ShiftHistoryTable
-          shifts={history}
+          shifts={shifts}
           showName={true}
           onSelect={setSelectedShift}
+        />
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalCount={totalCount}
+          pageSize={pageSize}
+          onPageChange={n => pushUrl({ page: n === 1 ? '' : String(n) })}
+          className="px-4 py-3 border-t border-gray-100"
         />
       </div>
 

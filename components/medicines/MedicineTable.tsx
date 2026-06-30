@@ -2,10 +2,11 @@
 
 import React, { useState, useMemo } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Search, ChevronUp, ChevronDown, BarChart2 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { Select } from '@/components/ui/Input'
+import { Pagination } from '@/components/ui/Pagination'
 import { FONT, PAGE, TEXT } from '@/lib/design-tokens'
 import { useDashboardUser } from '@/lib/dashboard-context'
 import type { MedicineCategory, MedicineSubcategory, MedicineRow } from '@/lib/db-types'
@@ -13,14 +14,23 @@ import type { MedicineCategory, MedicineSubcategory, MedicineRow } from '@/lib/d
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface MedicineTableProps {
-  medicines:     MedicineRow[]
-  categories:    MedicineCategory[]
-  subcategories: MedicineSubcategory[]
-  canWrite:      boolean
-  onEdit:        (m: MedicineRow) => void
-  onDeactivate:  (m: MedicineRow) => void
-  onReactivate:  (m: MedicineRow) => void
-  onViewStock:   (m: MedicineRow) => void
+  medicines:       MedicineRow[]
+  categories:      MedicineCategory[]
+  subcategories:   MedicineSubcategory[]
+  canWrite:        boolean
+  onEdit:          (m: MedicineRow) => void
+  onDeactivate:    (m: MedicineRow) => void
+  onReactivate:    (m: MedicineRow) => void
+  onViewStock:     (m: MedicineRow) => void
+  // Pagination + filter defaults
+  currentPage:     number
+  totalCount:      number
+  pageSize:        number
+  defaultSearch:   string
+  defaultCat:      string
+  defaultSubcat:   string
+  defaultSchedule: string
+  defaultStatus:   string
 }
 
 type SortKey = 'name' | 'code' | 'manufacturer' | 'mrp' | 'total_stock'
@@ -49,50 +59,46 @@ export function MedicineTable({
   onDeactivate,
   onReactivate,
   onViewStock,
+  currentPage,
+  totalCount,
+  pageSize,
+  defaultSearch,
+  defaultCat,
+  defaultSubcat,
+  defaultSchedule,
+  defaultStatus,
 }: MedicineTableProps) {
+  const router = useRouter()
   const { role } = useDashboardUser()
   const canReport = role === 'superadmin' || role === 'admin'
 
-  const [search,        setSearch]        = useState('')
-  const [catFilter,     setCatFilter]     = useState('')
-  const [subCatFilter,  setSubCatFilter]  = useState('')
-  const [schedFilter,   setSchedFilter]   = useState('')
-  const [statusFilter,  setStatusFilter]  = useState('all')
-  const [sortKey,       setSortKey]       = useState<SortKey>('name')
-  const [sortDir,       setSortDir]       = useState<SortDir>('asc')
+  // Local state only for the text search input (typed but not yet submitted)
+  const [localSearch, setLocalSearch] = useState(defaultSearch)
 
-  // Subcategories visible in filter dropdown depend on selected category
+  // Sort state is client-side (sorts within the current page)
+  const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+
+  // Derive display values from props (updated on each server render after navigation)
+  const catFilter    = defaultCat
+  const subCatFilter = defaultSubcat
+  const schedFilter  = defaultSchedule
+  const statusFilter = defaultStatus || 'all'
+
+  // Subcategories visible depend on selected category
   const visibleSubcats = useMemo(
     () => catFilter ? subcategories.filter(s => s.category_id === catFilter) : subcategories,
     [subcategories, catFilter],
   )
 
-  // Category/subcategory name lookup maps
   const catMap = useMemo(
     () => new Map(categories.map(c => [c.id, c.name])),
     [categories],
   )
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase()
-    return medicines.filter(m => {
-      if (q && !(
-        m.name.toLowerCase().includes(q) ||
-        (m.generic_name ?? '').toLowerCase().includes(q) ||
-        (m.code ?? '').toLowerCase().includes(q) ||
-        (m.manufacturer ?? '').toLowerCase().includes(q)
-      )) return false
-      if (catFilter    && m.category_id    !== catFilter)    return false
-      if (subCatFilter && m.subcategory_id !== subCatFilter) return false
-      if (schedFilter  && m.schedule       !== schedFilter)  return false
-      if (statusFilter === 'active'   && !m.is_active) return false
-      if (statusFilter === 'inactive' &&  m.is_active) return false
-      return true
-    })
-  }, [medicines, search, catFilter, subCatFilter, schedFilter, statusFilter])
-
+  // Sort within the current page (server already filtered)
   const sorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
+    return [...medicines].sort((a, b) => {
       let av: string | number = a[sortKey] ?? ''
       let bv: string | number = b[sortKey] ?? ''
       if (typeof av === 'string') av = av.toLowerCase()
@@ -101,7 +107,7 @@ export function MedicineTable({
       if (av > bv) return sortDir === 'asc' ?  1 : -1
       return 0
     })
-  }, [filtered, sortKey, sortDir])
+  }, [medicines, sortKey, sortDir])
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -113,6 +119,36 @@ export function MedicineTable({
     return sortDir === 'asc'
       ? <ChevronUp size={11} style={{ color: '#0F6E56' }} />
       : <ChevronDown size={11} style={{ color: '#0F6E56' }} />
+  }
+
+  // Build URL from the currently-applied filter props + any overrides
+  function pushDropdownChange(overrides: Record<string, string>) {
+    const params = new URLSearchParams()
+    const all = {
+      search:   defaultSearch,
+      cat:      catFilter,
+      subcat:   subCatFilter,
+      schedule: schedFilter,
+      status:   statusFilter === 'all' ? '' : statusFilter,
+      ...overrides,
+    }
+    if (all.search)                              params.set('search',   all.search)
+    if (all.cat)                                 params.set('cat',      all.cat)
+    if (all.subcat)                              params.set('subcat',   all.subcat)
+    if (all.schedule)                            params.set('schedule', all.schedule)
+    if (all.status && all.status !== 'all')      params.set('status',   all.status)
+    // page omitted → resets to 1
+    router.push('?' + params.toString())
+  }
+
+  function submitSearch() {
+    const params = new URLSearchParams()
+    if (localSearch)                                   params.set('search',   localSearch)
+    if (catFilter)                                     params.set('cat',      catFilter)
+    if (subCatFilter)                                  params.set('subcat',   subCatFilter)
+    if (schedFilter)                                   params.set('schedule', schedFilter)
+    if (statusFilter && statusFilter !== 'all')        params.set('status',   statusFilter)
+    router.push('?' + params.toString())
   }
 
   const thStyle: React.CSSProperties = {
@@ -145,9 +181,10 @@ export function MedicineTable({
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#9ca3af] pointer-events-none" />
           <input
             type="text"
-            placeholder="Search name, code, manufacturer…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+            placeholder="Search name, code, manufacturer… (Enter)"
+            value={localSearch}
+            onChange={e => setLocalSearch(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') submitSearch() }}
             style={{
               width: '100%',
               height: 32,
@@ -166,7 +203,7 @@ export function MedicineTable({
         {/* Category filter */}
         <select
           value={catFilter}
-          onChange={e => { setCatFilter(e.target.value); setSubCatFilter('') }}
+          onChange={e => pushDropdownChange({ cat: e.target.value, subcat: '' })}
           style={{ height: 32, fontSize: 12, border: `1px solid ${PAGE.border}`, borderRadius: 6, padding: '0 8px', background: '#fff', color: TEXT.primary, minWidth: 130 }}
         >
           <option value="">All Categories</option>
@@ -176,7 +213,7 @@ export function MedicineTable({
         {/* Subcategory filter */}
         <select
           value={subCatFilter}
-          onChange={e => setSubCatFilter(e.target.value)}
+          onChange={e => pushDropdownChange({ subcat: e.target.value })}
           style={{ height: 32, fontSize: 12, border: `1px solid ${PAGE.border}`, borderRadius: 6, padding: '0 8px', background: '#fff', color: TEXT.primary, minWidth: 140 }}
         >
           <option value="">All Subcategories</option>
@@ -186,7 +223,7 @@ export function MedicineTable({
         {/* Schedule filter */}
         <select
           value={schedFilter}
-          onChange={e => setSchedFilter(e.target.value)}
+          onChange={e => pushDropdownChange({ schedule: e.target.value })}
           style={{ height: 32, fontSize: 12, border: `1px solid ${PAGE.border}`, borderRadius: 6, padding: '0 8px', background: '#fff', color: TEXT.primary, minWidth: 130 }}
         >
           <option value="">All Schedules</option>
@@ -198,7 +235,7 @@ export function MedicineTable({
         {/* Status filter */}
         <select
           value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
+          onChange={e => pushDropdownChange({ status: e.target.value })}
           style={{ height: 32, fontSize: 12, border: `1px solid ${PAGE.border}`, borderRadius: 6, padding: '0 8px', background: '#fff', color: TEXT.primary, minWidth: 110 }}
         >
           <option value="all">All Status</option>
@@ -206,12 +243,6 @@ export function MedicineTable({
           <option value="inactive">Inactive</option>
         </select>
       </div>
-
-      {/* Result count */}
-      <p style={{ fontSize: 11, color: TEXT.secondary, marginBottom: 8 }}>
-        {sorted.length} medicine{sorted.length !== 1 ? 's' : ''}
-        {filtered.length !== medicines.length ? ` (filtered from ${medicines.length})` : ''}
-      </p>
 
       {/* Table */}
       <div style={{ overflowX: 'auto', borderRadius: 8, border: `1px solid ${PAGE.border}` }}>
@@ -331,6 +362,20 @@ export function MedicineTable({
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={Math.ceil(totalCount / pageSize) || 1}
+        totalCount={totalCount}
+        pageSize={pageSize}
+        onPageChange={(p) => {
+          const params = new URLSearchParams(window.location.search)
+          params.set('page', String(p))
+          router.push('?' + params.toString())
+        }}
+        className="mt-2"
+      />
     </div>
   )
 }

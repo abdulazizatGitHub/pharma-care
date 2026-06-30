@@ -5,7 +5,13 @@ import { getCurrentShift, getShiftHistory } from '@/app/actions/shifts'
 import { PharmacistShiftsContent } from '@/components/shifts/PharmacistShiftsContent'
 import type { UserRole, Permission } from '@/lib/permissions'
 
-export default async function PharmacistShiftsPage() {
+const PAGE_SIZE = 15
+
+export default async function PharmacistShiftsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>
+}) {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -25,15 +31,21 @@ export default async function PharmacistShiftsPage() {
 
   if (!hasPermission(permissions, 'shifts')) redirect('/unauthorized')
 
+  const sp = await searchParams
+  const page = Math.max(1, parseInt(sp.page ?? '1', 10))
+
   const [shiftResult, historyResult] = await Promise.all([
     getCurrentShift(user.id),
-    getShiftHistory(user.id),
+    getShiftHistory(user.id, undefined, undefined, page, PAGE_SIZE),
   ])
 
   return (
     <PharmacistShiftsContent
       initialShift={shiftResult.data}
       initialHistory={historyResult.data ?? []}
+      currentPage={page}
+      totalCount={historyResult.total}
+      pageSize={PAGE_SIZE}
     />
   )
 }

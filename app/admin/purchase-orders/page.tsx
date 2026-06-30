@@ -6,7 +6,17 @@ import type { UserRole, Permission } from '@/lib/permissions'
 import type { POStatus, Supplier } from '@/lib/db-types'
 import type { POListRow } from '@/components/procurement/POTable'
 
-export default async function AdminPurchaseOrdersPage() {
+const PAGE_SIZE = 15
+
+export default async function AdminPurchaseOrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    page?:       string
+    status?:     string
+    supplierId?: string
+  }>
+}) {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -26,15 +36,28 @@ export default async function AdminPurchaseOrdersPage() {
 
   if (!hasPermission(permissions, 'purchase_orders')) redirect('/unauthorized')
 
-  const [{ data: rawPOs }, { data: suppliers }] = await Promise.all([
-    supabase
-      .from('purchase_orders')
-      .select(`
-        id, po_number, supplier_id, total_amount, status, notes, created_at,
-        suppliers ( name )
-      `)
-      .eq('is_deleted', false)
-      .order('created_at', { ascending: false }),
+  const sp = await searchParams
+
+  const page       = Math.max(1, parseInt(sp.page ?? '1', 10))
+  const status     = sp.status     ?? ''
+  const supplierId = sp.supplierId ?? ''
+  const offset     = (page - 1) * PAGE_SIZE
+
+  let poQuery = supabase
+    .from('purchase_orders')
+    .select(
+      `id, po_number, supplier_id, total_amount, status, notes, created_at, suppliers ( name )`,
+      { count: 'exact' }
+    )
+    .eq('is_deleted', false)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + PAGE_SIZE - 1)
+
+  if (status)     poQuery = poQuery.eq('status', status)
+  if (supplierId) poQuery = poQuery.eq('supplier_id', supplierId)
+
+  const [{ data: rawPOs, count: totalCount }, { data: suppliers }] = await Promise.all([
+    poQuery,
     supabase
       .from('suppliers')
       .select('*')
@@ -43,7 +66,6 @@ export default async function AdminPurchaseOrdersPage() {
       .order('name'),
   ])
 
-  // Count items per PO
   const poIds = (rawPOs ?? []).map((p: { id: string }) => p.id)
   const { data: itemCounts } = poIds.length > 0
     ? await supabase
@@ -57,7 +79,11 @@ export default async function AdminPurchaseOrdersPage() {
     countMap.set(row.po_id, (countMap.get(row.po_id) ?? 0) + 1)
   }
 
-  type RawPO = { id: string; po_number: string; supplier_id: string; total_amount: number; status: string; created_at: string; suppliers: { name: string } | null }
+  type RawPO = {
+    id: string; po_number: string; supplier_id: string;
+    total_amount: number; status: string; created_at: string;
+    suppliers: { name: string } | null
+  }
   const pos: POListRow[] = ((rawPOs ?? []) as unknown as RawPO[]).map(p => ({
     id:            p.id,
     po_number:     p.po_number,
@@ -74,6 +100,11 @@ export default async function AdminPurchaseOrdersPage() {
       pos={pos}
       suppliers={(suppliers ?? []) as Supplier[]}
       basePath="/admin/purchase-orders"
+      currentPage={page}
+      totalCount={totalCount ?? 0}
+      pageSize={PAGE_SIZE}
+      defaultStatus={status}
+      defaultSupplierId={supplierId}
     />
   )
 }

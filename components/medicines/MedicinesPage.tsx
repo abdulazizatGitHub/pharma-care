@@ -23,16 +23,28 @@ export type { MedicineRow }
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface MedicinesPageProps {
-  medicines:     MedicineRow[]
-  categories:    MedicineCategory[]
-  subcategories: MedicineSubcategory[]
-  genericNames:  GenericNameOption[]
-  suppliers:     Supplier[]
+  medicines:       MedicineRow[]
+  categories:      MedicineCategory[]
+  subcategories:   MedicineSubcategory[]
+  genericNames:    GenericNameOption[]
+  suppliers:       Supplier[]
+  currentPage:     number
+  totalCount:      number
+  pageSize:        number
+  defaultSearch:   string
+  defaultCat:      string
+  defaultSubcat:   string
+  defaultSchedule: string
+  defaultStatus:   string
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function MedicinesPage({ medicines, categories, subcategories, genericNames, suppliers }: MedicinesPageProps) {
+export function MedicinesPage({
+  medicines, categories, subcategories, genericNames, suppliers,
+  currentPage, totalCount, pageSize,
+  defaultSearch, defaultCat, defaultSubcat, defaultSchedule, defaultStatus,
+}: MedicinesPageProps) {
   const router = useRouter()
   const { role, permissions } = useDashboardUser()
 
@@ -102,7 +114,7 @@ export function MedicinesPage({ medicines, categories, subcategories, genericNam
             Medicines
           </h1>
           <p style={{ fontSize: FONT.pageSubhead, color: TEXT.secondary, margin: '2px 0 0' }}>
-            {medicines.length} medicine{medicines.length !== 1 ? 's' : ''} in catalog
+            {totalCount} medicine{totalCount !== 1 ? 's' : ''} in catalog
           </p>
         </div>
 
@@ -163,6 +175,14 @@ export function MedicinesPage({ medicines, categories, subcategories, genericNam
           onDeactivate={handleDeactivate}
           onReactivate={handleReactivate}
           onViewStock={handleViewStock}
+          currentPage={currentPage}
+          totalCount={totalCount}
+          pageSize={pageSize}
+          defaultSearch={defaultSearch}
+          defaultCat={defaultCat}
+          defaultSubcat={defaultSubcat}
+          defaultSchedule={defaultSchedule}
+          defaultStatus={defaultStatus}
         />
       </div>
 

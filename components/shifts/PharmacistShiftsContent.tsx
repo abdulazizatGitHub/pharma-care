@@ -1,10 +1,12 @@
 'use client'
 
 import React, { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Printer } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
+import { Pagination } from '@/components/ui/Pagination'
 import { ShiftStatusBanner } from './ShiftStatusBanner'
 import { ShiftHistoryTable } from './ShiftHistoryTable'
 import { ShiftDetailPanel } from './ShiftDetailPanel'
@@ -16,13 +18,26 @@ import type { DailyBorrowingReport as ReportData } from '@/app/actions/borrowing
 interface Props {
   initialShift:   ShiftRow | null
   initialHistory: ShiftRow[]
+  currentPage:    number
+  totalCount:     number
+  pageSize:       number
 }
 
-export function PharmacistShiftsContent({ initialShift, initialHistory }: Props) {
+export function PharmacistShiftsContent({
+  initialShift,
+  initialHistory,
+  currentPage,
+  totalCount,
+  pageSize,
+}: Props) {
+  const router = useRouter()
+
   const [selectedShift, setSelectedShift] = useState<ShiftRow | null>(null)
   const [reportOpen,    setReportOpen]    = useState(false)
   const [reportData,    setReportData]    = useState<ReportData | null>(null)
   const [loadingRpt,    setLoadingRpt]    = useState(false)
+
+  const totalPages = Math.ceil(totalCount / pageSize)
 
   async function handlePrintReport() {
     const today = new Date().toISOString().split('T')[0]
@@ -69,6 +84,14 @@ export function PharmacistShiftsContent({ initialShift, initialHistory }: Props)
           shifts={initialHistory}
           showName={false}
           onSelect={setSelectedShift}
+        />
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalCount={totalCount}
+          pageSize={pageSize}
+          onPageChange={n => router.push('?page=' + (n === 1 ? '' : n))}
+          className="px-4 py-3 border-t border-gray-100"
         />
       </div>
 

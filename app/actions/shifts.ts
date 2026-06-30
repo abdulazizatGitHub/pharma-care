@@ -289,16 +289,21 @@ export async function getCurrentShift(userId?: string) {
 
 // ─── getShiftHistory ──────────────────────────────────────────────────────────
 
-export async function getShiftHistory(userId?: string, dateFrom?: string, dateTo?: string) {
+export async function getShiftHistory(
+  userId?: string,
+  dateFrom?: string,
+  dateTo?: string,
+  page?: number,
+  pageSize?: number,
+): Promise<{ data: ShiftRow[]; total: number; error: string | null }> {
   const { supabase, user, role } = await getCallerContext()
-  if (!user || !role) return { data: [] as ShiftRow[], error: 'Unauthorized' }
+  if (!user || !role) return { data: [] as ShiftRow[], total: 0, error: 'Unauthorized' }
 
   let query = supabase
     .from('shifts')
-    .select('id, cashier_id, opened_at, closed_at, opening_cash, closing_cash, expected_cash, cash_difference, status, notes')
+    .select('id, cashier_id, opened_at, closed_at, opening_cash, closing_cash, expected_cash, cash_difference, status, notes', { count: 'exact' })
     .eq('status', 'closed')
     .order('opened_at', { ascending: false })
-    .limit(200)
 
   if (role === 'pharmacist') {
     query = query.eq('cashier_id', user.id)
@@ -309,9 +314,16 @@ export async function getShiftHistory(userId?: string, dateFrom?: string, dateTo
   if (dateFrom) query = query.gte('opened_at', dateFrom)
   if (dateTo)   query = query.lte('opened_at', dateTo + 'T23:59:59Z')
 
-  const { data: shifts, error } = await query
-  if (error) return { data: [] as ShiftRow[], error: error.message }
-  if (!shifts?.length) return { data: [] as ShiftRow[], error: null }
+  if (page !== undefined && pageSize !== undefined) {
+    const offset = (page - 1) * pageSize
+    query = query.range(offset, offset + pageSize - 1)
+  } else {
+    query = query.limit(200)
+  }
+
+  const { data: shifts, count, error } = await query
+  if (error) return { data: [] as ShiftRow[], total: 0, error: error.message }
+  if (!shifts?.length) return { data: [] as ShiftRow[], total: count ?? 0, error: null }
 
   // Fetch cashier names
   const cashierIds = [...new Set(shifts.map(s => s.cashier_id))]
@@ -328,6 +340,7 @@ export async function getShiftHistory(userId?: string, dateFrom?: string, dateTo
       ...s,
       cashier_name: nameMap[s.cashier_id] ?? null,
     })) as ShiftRow[],
+    total: count ?? shifts.length,
     error: null,
   }
 }

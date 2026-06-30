@@ -118,24 +118,30 @@ export function AdminSidebar({ pharmacyName }: Props) {
   const { permissions } = useDashboardUser()
 
   useEffect(() => {
-    let stored: Record<string, boolean> = {}
-    try {
-      const raw = localStorage.getItem(AD_STORAGE_KEY)
-      if (raw) stored = JSON.parse(raw) as Record<string, boolean>
-    } catch {}
+    const initial: Record<string, boolean> = {}
+    NAV_ENTRIES.forEach(e => { if (e.type === 'group') initial[e.label] = false })
     const active = getActiveGroupAD(pathname)
-    if (active) stored = { ...stored, [active]: true }
-    setGroupsOpen(stored)
+    if (active) initial[active] = true
+    setGroupsOpen(initial)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const active = getActiveGroupAD(pathname)
-    if (active) setGroupsOpen(prev => ({ ...prev, [active]: true }))
+    if (active) {
+      setGroupsOpen(prev => {
+        const allClosed: Record<string, boolean> = {}
+        Object.keys(prev).forEach(k => { allClosed[k] = false })
+        return { ...allClosed, [active]: true }
+      })
+    }
   }, [pathname])
 
   function toggleGroup(label: string) {
     setGroupsOpen(prev => {
-      const next = { ...prev, [label]: !prev[label] }
+      const wasOpen = !!prev[label]
+      const allClosed: Record<string, boolean> = {}
+      Object.keys(prev).forEach(k => { allClosed[k] = false })
+      const next = { ...allClosed, [label]: !wasOpen }
       try { localStorage.setItem(AD_STORAGE_KEY, JSON.stringify(next)) } catch {}
       return next
     })

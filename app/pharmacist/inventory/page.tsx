@@ -6,7 +6,20 @@ import type { UserRole, Permission } from '@/lib/permissions'
 import type { MedicineRow, MedicineCategory, MedicineSubcategory, Medicine, Supplier } from '@/lib/db-types'
 import type { GenericNameOption } from '@/components/medicines/GenericNameCombobox'
 
-export default async function PharmacistInventoryPage() {
+const PAGE_SIZE = 15
+
+export default async function PharmacistInventoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    page?:     string
+    search?:   string
+    cat?:      string
+    subcat?:   string
+    schedule?: string
+    status?:   string
+  }>
+}) {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -26,14 +39,42 @@ export default async function PharmacistInventoryPage() {
 
   if (!hasPermission(permissions, 'inventory_view')) redirect('/unauthorized')
 
+  const sp = await searchParams
+
+  const page     = Math.max(1, parseInt(sp.page ?? '1', 10))
+  const search   = sp.search   ?? ''
+  const cat      = sp.cat      ?? ''
+  const subcat   = sp.subcat   ?? ''
+  const schedule = sp.schedule ?? ''
+  const status   = sp.status   ?? ''
+  const offset   = (page - 1) * PAGE_SIZE
+
+  let medQuery = supabase
+    .from('medicines')
+    .select('*', { count: 'exact' })
+    .eq('is_deleted', false)
+    .order('name')
+    .range(offset, offset + PAGE_SIZE - 1)
+
+  if (search) {
+    medQuery = medQuery.or(
+      `name.ilike.%${search}%,generic_name.ilike.%${search}%,code.ilike.%${search}%,manufacturer.ilike.%${search}%`
+    )
+  }
+  if (cat)      medQuery = medQuery.eq('category_id', cat)
+  if (subcat)   medQuery = medQuery.eq('subcategory_id', subcat)
+  if (schedule) medQuery = medQuery.eq('schedule', schedule)
+  if (status === 'active')   medQuery = medQuery.eq('is_active', true)
+  if (status === 'inactive') medQuery = medQuery.eq('is_active', false)
+
   const [
-    { data: medicines },
+    { data: medicines, count: totalCount },
     { data: categories },
     { data: subcategories },
     { data: stockSummary },
     { data: genericNamesData },
   ] = await Promise.all([
-    supabase.from('medicines').select('*').eq('is_deleted', false).order('name'),
+    medQuery,
     supabase.from('medicine_categories').select('id, name, slug, is_deleted, created_at').eq('is_deleted', false).order('name'),
     supabase.from('medicine_subcategories').select('id, category_id, name, slug, is_deleted, created_at').eq('is_deleted', false).order('name'),
     supabase.rpc('get_stock_summary'),
@@ -60,6 +101,14 @@ export default async function PharmacistInventoryPage() {
       subcategories={(subcategories ?? []) as MedicineSubcategory[]}
       genericNames={(genericNamesData ?? []) as GenericNameOption[]}
       suppliers={[] as Supplier[]}
+      currentPage={page}
+      totalCount={totalCount ?? 0}
+      pageSize={PAGE_SIZE}
+      defaultSearch={search}
+      defaultCat={cat}
+      defaultSubcat={subcat}
+      defaultSchedule={schedule}
+      defaultStatus={status}
     />
   )
 }

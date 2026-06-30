@@ -57,7 +57,7 @@ async function getCallerRole(): Promise<{ supabase: Awaited<ReturnType<typeof cr
 export async function getAuditLogs(
   filters?: AuditFilters,
   page = 1,
-  pageSize = 50,
+  pageSize = 15,
 ): Promise<{ data: AuditLogPage | null; error: string | null }> {
   const { supabase, role } = await getCallerRole()
   if (!role || !['superadmin', 'admin'].includes(role)) {

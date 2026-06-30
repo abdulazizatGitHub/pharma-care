@@ -1,10 +1,12 @@
 'use client'
 
 import React, { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { Trash2, Pencil, XCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Pagination } from '@/components/ui/Pagination'
 import { useToast } from '@/components/ui/Toast'
 import { softDeleteExpense, updateExpenseDetails, voidExpense } from '@/app/actions/expenses'
 import { EXPENSE_ACCOUNT_LABELS } from '@/lib/expense-constants'
@@ -31,6 +33,12 @@ interface Props {
   expenses:            ExpenseRow[]
   isSuperadmin:        boolean
   onVoidAndReRecord?:  (expense: ExpenseRow) => void
+  // Pagination + filter defaults
+  currentPage:         number
+  total:               number
+  pageSize:            number
+  defaultSearch:       string
+  defaultAccountCode:  string
 }
 
 interface EditFields {
@@ -39,10 +47,16 @@ interface EditFields {
   category:     string
 }
 
-export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Props) {
+export function ExpenseTable({
+  expenses, isSuperadmin, onVoidAndReRecord,
+  currentPage, total, pageSize, defaultSearch, defaultAccountCode,
+}: Props) {
+  const router = useRouter()
   const { toast } = useToast()
-  const [search,     setSearch]     = useState('')
-  const [filterCode, setFilterCode] = useState('')
+
+  // Local state only for the text search input
+  const [localSearch, setLocalSearch] = useState(defaultSearch)
+
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteErr,  setDeleteErr]  = useState<Record<string, string>>({})
   const [isPending,  startTransition] = useTransition()
@@ -60,7 +74,7 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
     setEditFields({
       description:  e.description  ?? '',
       reference_no: e.reference_no ?? '',
-      category:     e.account_name ?? '',  // FIX 1: pre-populate from account_name (matches dropdown values)
+      category:     e.account_name ?? '',
     })
     setEditErr(null)
   }
@@ -86,14 +100,6 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
       }
     })
   }
-
-  // Client-side filters
-  const visible = expenses.filter(e => {
-    const matchSearch = !search ||
-      e.description.toLowerCase().includes(search.toLowerCase())
-    const matchCode = !filterCode || e.account_code === filterCode
-    return matchSearch && matchCode
-  })
 
   function handleDelete(id: string) {
     setDeletingId(id)
@@ -132,6 +138,24 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
     })
   }
 
+  // Build URL from applied filter props + overrides
+  function pushFilters(overrides: Record<string, string>) {
+    const params = new URLSearchParams()
+    const all = {
+      search:      defaultSearch,
+      accountCode: defaultAccountCode,
+      ...overrides,
+    }
+    if (all.search)      params.set('search',      all.search)
+    if (all.accountCode) params.set('accountCode', all.accountCode)
+    // page omitted → resets to 1
+    router.push('?' + params.toString())
+  }
+
+  function submitSearch() {
+    pushFilters({ search: localSearch })
+  }
+
   return (
     <div style={{ background: '#fff', border: '0.5px solid rgba(0,0,0,0.08)', borderRadius: 8, overflow: 'hidden' }}>
       {/* Filters bar */}
@@ -144,9 +168,10 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
       >
         <input
           type="text"
-          placeholder="Search description…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
+          placeholder="Search description… (Enter)"
+          value={localSearch}
+          onChange={e => setLocalSearch(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') submitSearch() }}
           style={{
             height: 30, padding: '0 10px', fontSize: 12, borderRadius: 6,
             border: '1px solid rgba(0,0,0,0.15)', color: '#111827',
@@ -154,8 +179,8 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
           }}
         />
         <select
-          value={filterCode}
-          onChange={e => setFilterCode(e.target.value)}
+          value={defaultAccountCode}
+          onChange={e => pushFilters({ accountCode: e.target.value })}
           style={{
             height: 30, padding: '0 8px', fontSize: 12, borderRadius: 6,
             border: '1px solid rgba(0,0,0,0.15)', color: '#111827',
@@ -167,14 +192,11 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
             <option key={code} value={code}>{name}</option>
           ))}
         </select>
-        <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 'auto' }}>
-          {visible.length} record{visible.length !== 1 ? 's' : ''}
-        </span>
       </div>
 
-      {visible.length === 0 ? (
+      {expenses.length === 0 ? (
         <div style={{ padding: '48px 24px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-          {expenses.length === 0 ? 'No expenses recorded yet.' : 'No expenses match your filter.'}
+          {total === 0 ? 'No expenses recorded yet.' : 'No expenses match your filter.'}
         </div>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -198,7 +220,7 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
             </tr>
           </thead>
           <tbody>
-            {visible.map((e, i) => {
+            {expenses.map((e, i) => {
               const voided = !!e.is_voided
               const rowOpacity = voided ? 0.5 : 1
               const textColor  = voided ? '#9ca3af' : undefined
@@ -244,55 +266,35 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
                       <td style={{ padding: '10px 12px' }}>
                         {!voided && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            {/* Edit */}
                             <button
                               title="Edit expense details"
                               onClick={() => openEdit(e)}
-                              style={{
-                                background: 'none', border: 'none', cursor: 'pointer',
-                                color: '#6b7280', padding: 4, borderRadius: 4,
-                                display: 'inline-flex', alignItems: 'center',
-                              }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', padding: 4, borderRadius: 4, display: 'inline-flex', alignItems: 'center' }}
                             >
                               <Pencil size={13} />
                             </button>
-                            {/* Void */}
                             <button
                               title="Void this expense"
                               onClick={() => setVoidTarget(e)}
                               disabled={isVoiding}
-                              style={{
-                                background: 'none', border: 'none', cursor: 'pointer',
-                                color: '#A32D2D', padding: 4, borderRadius: 4,
-                                display: 'inline-flex', alignItems: 'center',
-                              }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#A32D2D', padding: 4, borderRadius: 4, display: 'inline-flex', alignItems: 'center' }}
                             >
                               <XCircle size={13} />
                             </button>
-                            {/* Void & Re-record */}
                             <button
                               title="Void and re-record with corrections"
                               onClick={() => handleVoidAndReRecord(e)}
                               disabled={isVoiding}
-                              style={{
-                                background: 'none', border: 'none', cursor: 'pointer',
-                                color: '#6b7280', padding: 4, borderRadius: 4,
-                                display: 'inline-flex', alignItems: 'center',
-                              }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', padding: 4, borderRadius: 4, display: 'inline-flex', alignItems: 'center' }}
                             >
                               <RefreshCw size={13} />
                             </button>
-                            {/* Delete (only for unposted edge case) */}
                             {!e.journal_entry_id && (
                               <button
                                 title="Delete expense (no journal entry posted)"
                                 onClick={() => handleDelete(e.id)}
                                 disabled={isPending && deletingId === e.id}
-                                style={{
-                                  background: 'none', border: 'none', cursor: 'pointer',
-                                  color: '#9ca3af', padding: 4, borderRadius: 4,
-                                  display: 'inline-flex', alignItems: 'center',
-                                }}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: 4, borderRadius: 4, display: 'inline-flex', alignItems: 'center' }}
                               >
                                 <Trash2 size={13} />
                               </button>
@@ -319,22 +321,35 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
         </table>
       )}
 
+      {/* Pagination */}
+      <div style={{ padding: '0 14px' }}>
+        <Pagination
+          currentPage={currentPage}
+          totalPages={Math.ceil(total / pageSize) || 1}
+          totalCount={total}
+          pageSize={pageSize}
+          onPageChange={(p) => {
+            const params = new URLSearchParams(window.location.search)
+            params.set('page', String(p))
+            router.push('?' + params.toString())
+          }}
+        />
+      </div>
+
       {/* Edit Expense Modal */}
       <Modal open={!!editTarget} onClose={closeEdit} title="Edit Expense" size="sm">
         {editTarget && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-            {/* Read-only context block */}
             <div style={{
               background: '#f9fafb', border: '0.5px solid rgba(0,0,0,0.08)',
               borderRadius: 8, padding: '12px 14px',
               display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px',
             }}>
               {[
-                { label: 'Date',         value: fmtDate(editTarget.expense_date) },
-                { label: 'Amount',       value: fmtPKR(Number(editTarget.amount)), valueColor: '#A32D2D' },
-                { label: 'Account',      value: editTarget.account_name ?? editTarget.account_code ?? '—' },
-                { label: 'Payment',      value: PAYMENT_LABELS[editTarget.payment_method ?? 'cash'] ?? editTarget.payment_method ?? 'Cash' },
+                { label: 'Date',    value: fmtDate(editTarget.expense_date) },
+                { label: 'Amount',  value: fmtPKR(Number(editTarget.amount)), valueColor: '#A32D2D' },
+                { label: 'Account', value: editTarget.account_name ?? editTarget.account_code ?? '—' },
+                { label: 'Payment', value: PAYMENT_LABELS[editTarget.payment_method ?? 'cash'] ?? editTarget.payment_method ?? 'Cash' },
               ].map(({ label, value, valueColor }) => (
                 <div key={label}>
                   <p style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 2px' }}>
@@ -347,52 +362,32 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
               ))}
             </div>
 
-            {/* Editable fields */}
             <div>
-              <label style={{ fontSize: 12, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-                Description
-              </label>
+              <label style={{ fontSize: 12, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>Description</label>
               <textarea
                 value={editFields.description}
                 onChange={e => setEditFields(prev => ({ ...prev, description: e.target.value }))}
                 rows={3}
                 maxLength={500}
-                style={{
-                  width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 6,
-                  border: '1px solid rgba(0,0,0,0.15)', color: '#111827',
-                  resize: 'vertical', outline: 'none', fontFamily: 'inherit',
-                  boxSizing: 'border-box',
-                }}
+                style={{ width: '100%', padding: '7px 10px', fontSize: 12, borderRadius: 6, border: '1px solid rgba(0,0,0,0.15)', color: '#111827', resize: 'vertical', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }}
               />
             </div>
             <div>
-              <label style={{ fontSize: 12, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-                Reference No
-              </label>
+              <label style={{ fontSize: 12, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>Reference No</label>
               <input
                 type="text"
                 value={editFields.reference_no}
                 onChange={e => setEditFields(prev => ({ ...prev, reference_no: e.target.value }))}
                 maxLength={100}
-                style={{
-                  width: '100%', height: 32, padding: '0 10px', fontSize: 12, borderRadius: 6,
-                  border: '1px solid rgba(0,0,0,0.15)', color: '#111827',
-                  outline: 'none', boxSizing: 'border-box',
-                }}
+                style={{ width: '100%', height: 32, padding: '0 10px', fontSize: 12, borderRadius: 6, border: '1px solid rgba(0,0,0,0.15)', color: '#111827', outline: 'none', boxSizing: 'border-box' }}
               />
             </div>
             <div>
-              <label style={{ fontSize: 12, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>
-                Category
-              </label>
+              <label style={{ fontSize: 12, fontWeight: 500, color: '#374151', display: 'block', marginBottom: 4 }}>Category</label>
               <select
                 value={editFields.category}
                 onChange={e => setEditFields(prev => ({ ...prev, category: e.target.value }))}
-                style={{
-                  width: '100%', height: 32, padding: '0 8px', fontSize: 12, borderRadius: 6,
-                  border: '1px solid rgba(0,0,0,0.15)', color: '#111827',
-                  background: '#fff', outline: 'none', boxSizing: 'border-box',
-                }}
+                style={{ width: '100%', height: 32, padding: '0 8px', fontSize: 12, borderRadius: 6, border: '1px solid rgba(0,0,0,0.15)', color: '#111827', background: '#fff', outline: 'none', boxSizing: 'border-box' }}
               >
                 <option value="">— Select category —</option>
                 {Object.entries(EXPENSE_ACCOUNT_LABELS).map(([code, name]) => (
@@ -412,12 +407,8 @@ export function ExpenseTable({ expenses, isSuperadmin, onVoidAndReRecord }: Prop
             )}
 
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
-              <Button variant="secondary" size="sm" onClick={closeEdit} disabled={isSaving}>
-                Cancel
-              </Button>
-              <Button size="sm" loading={isSaving} onClick={handleSave}>
-                Save Changes
-              </Button>
+              <Button variant="secondary" size="sm" onClick={closeEdit} disabled={isSaving}>Cancel</Button>
+              <Button size="sm" loading={isSaving} onClick={handleSave}>Save Changes</Button>
             </div>
           </div>
         )}

@@ -1,15 +1,16 @@
 'use client'
 
-import React, { useState, useTransition } from 'react'
+import React, { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer,
 } from 'recharts'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Pagination } from '@/components/ui/Pagination'
 import { AuditLogRow } from './AuditLogRow'
-import { getAuditLogs, getAuditStats } from '@/app/actions/audit'
 import { ACTION_TYPES } from '@/lib/audit'
-import type { AuditLogPage, AuditStats, AuditFilters, AuditFilterOptions } from '@/app/actions/audit'
+import type { AuditLogRow as AuditLogRowType, AuditStats, AuditFilterOptions } from '@/app/actions/audit'
 
 // ─── Format helpers ───────────────────────────────────────────────────────────
 
@@ -38,60 +39,58 @@ function StatCard({ label, value }: { label: string; value: string }) {
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface Props {
-  initialPage:    AuditLogPage
-  initialStats:   AuditStats | null
-  filterOptions:  AuditFilterOptions
-  role:           string
-  defaultDateFrom: string
-  defaultDateTo:   string
+  logs:             AuditLogRowType[]
+  currentPage:      number
+  totalCount:       number
+  initialStats:     AuditStats | null
+  filterOptions:    AuditFilterOptions
+  role:             string
+  defaultDateFrom:  string
+  defaultDateTo:    string
+  defaultUserId:    string
+  defaultAction:    string
+  defaultTableName: string
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AuditPage({
-  initialPage,
+  logs,
+  currentPage,
+  totalCount,
   initialStats,
   filterOptions,
   role,
   defaultDateFrom,
   defaultDateTo,
+  defaultUserId,
+  defaultAction,
+  defaultTableName,
 }: Props) {
-  const [logPage,    setLogPage]    = useState<AuditLogPage>(initialPage)
-  const [stats,      setStats]      = useState<AuditStats | null>(initialStats)
-  const [isPending,  startTransition] = useTransition()
+  const router = useRouter()
 
-  // Filter state
-  const [userId,    setUserId]    = useState('')
-  const [action,    setAction]    = useState('')
-  const [tableName, setTableName] = useState('')
+  // Controlled filter inputs (reflect URL state; Apply pushes to URL)
+  const [userId,    setUserId]    = useState(defaultUserId)
+  const [action,    setAction]    = useState(defaultAction)
+  const [tableName, setTableName] = useState(defaultTableName)
   const [dateFrom,  setDateFrom]  = useState(defaultDateFrom)
   const [dateTo,    setDateTo]    = useState(defaultDateTo)
 
-  const allActions = Object.values(ACTION_TYPES) as string[]
+  const allActions   = Object.values(ACTION_TYPES) as string[]
+  const totalPages   = Math.ceil(totalCount / 15) || 1
+  const mostActiveUser   = initialStats?.actions_by_user[0]?.user_name ?? '—'
+  const mostCommonAction = initialStats?.actions_by_type[0]?.action    ?? '—'
 
-  function buildFilters(): AuditFilters {
-    return {
-      userId:    userId    || undefined,
-      action:    action    || undefined,
-      tableName: tableName || undefined,
-      dateFrom:  dateFrom  || undefined,
-      dateTo:    dateTo    || undefined,
-    }
+  function applyFilters() {
+    const params = new URLSearchParams()
+    if (userId)    params.set('userId',    userId)
+    if (action)    params.set('action',    action)
+    if (tableName) params.set('tableName', tableName)
+    if (dateFrom)  params.set('dateFrom',  dateFrom)
+    if (dateTo)    params.set('dateTo',    dateTo)
+    // page omitted — resets to 1 on filter change
+    router.push('?' + params.toString())
   }
-
-  function fetchPage(page: number, filters?: AuditFilters) {
-    startTransition(async () => {
-      const f = filters ?? buildFilters()
-      const [logsRes, statsRes] = await Promise.all([
-        getAuditLogs(f, page, 50),
-        role === 'superadmin' ? getAuditStats(dateFrom || defaultDateFrom, dateTo || defaultDateTo) : Promise.resolve({ data: null, error: null }),
-      ])
-      if (logsRes.data)  setLogPage(logsRes.data)
-      if (statsRes.data) setStats(statsRes.data)
-    })
-  }
-
-  function applyFilters() { fetchPage(1) }
 
   function clearFilters() {
     setUserId('')
@@ -99,21 +98,8 @@ export function AuditPage({
     setTableName('')
     setDateFrom(defaultDateFrom)
     setDateTo(defaultDateTo)
-    startTransition(async () => {
-      const [logsRes, statsRes] = await Promise.all([
-        getAuditLogs({ dateFrom: defaultDateFrom, dateTo: defaultDateTo }, 1, 50),
-        role === 'superadmin' ? getAuditStats(defaultDateFrom, defaultDateTo) : Promise.resolve({ data: null, error: null }),
-      ])
-      if (logsRes.data)  setLogPage(logsRes.data)
-      if (statsRes.data) setStats(statsRes.data)
-    })
+    router.push('?dateFrom=' + defaultDateFrom + '&dateTo=' + defaultDateTo)
   }
-
-  const totalPages = Math.ceil(logPage.total / logPage.pageSize) || 1
-
-  // Stats derived
-  const mostActiveUser   = stats?.actions_by_user[0]?.user_name ?? '—'
-  const mostCommonAction = stats?.actions_by_type[0]?.action ?? '—'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -124,7 +110,7 @@ export function AuditPage({
 
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-        <StatCard label="Total Actions" value={(stats?.total_actions ?? logPage.total).toLocaleString()} />
+        <StatCard label="Total Actions"      value={(initialStats?.total_actions ?? totalCount).toLocaleString()} />
         <StatCard label="Most Active User"   value={mostActiveUser} />
         <StatCard label="Most Common Action" value={mostCommonAction} />
       </div>
@@ -163,14 +149,12 @@ export function AuditPage({
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={applyFilters}
-            disabled={isPending}
             style={{ padding: '6px 16px', fontSize: 13, fontWeight: 600, background: '#0f766e', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
           >
-            {isPending ? 'Loading…' : 'Apply'}
+            Apply
           </button>
           <button
             onClick={clearFilters}
-            disabled={isPending}
             style={{ padding: '6px 12px', fontSize: 13, color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, cursor: 'pointer' }}
           >
             Clear
@@ -179,13 +163,13 @@ export function AuditPage({
       </div>
 
       {/* Activity chart — superadmin only */}
-      {role === 'superadmin' && stats && stats.actions_by_day.length > 0 && (
+      {role === 'superadmin' && initialStats && initialStats.actions_by_day.length > 0 && (
         <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px' }}>
           <p style={{ margin: '0 0 10px', fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Activity Trend
           </p>
           <ResponsiveContainer width="100%" height={120}>
-            <LineChart data={stats.actions_by_day} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+            <LineChart data={initialStats.actions_by_day} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
               <XAxis
                 dataKey="date"
@@ -221,7 +205,7 @@ export function AuditPage({
             Audit Log
           </p>
           <span style={{ fontSize: 12, color: '#6b7280' }}>
-            {logPage.total.toLocaleString()} total · page {logPage.page} of {totalPages}
+            {totalCount.toLocaleString()} total · page {currentPage} of {totalPages}
           </span>
         </div>
 
@@ -238,38 +222,32 @@ export function AuditPage({
               </tr>
             </thead>
             <tbody>
-              {logPage.logs.length === 0 ? (
+              {logs.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ padding: '40px 16px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
                     No audit logs found for the selected filters.
                   </td>
                 </tr>
               ) : (
-                logPage.logs.map(log => <AuditLogRow key={log.id} log={log} />)
+                logs.map(log => <AuditLogRow key={log.id} log={log} />)
               )}
             </tbody>
           </table>
         </div>
 
         {/* Pagination */}
-        <div style={{ padding: '10px 16px', borderTop: '1px solid #f3f4f6', display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
-          <button
-            onClick={() => fetchPage(logPage.page - 1)}
-            disabled={logPage.page <= 1 || isPending}
-            style={paginationBtnStyle(logPage.page <= 1)}
-          >
-            ← Prev
-          </button>
-          <span style={{ fontSize: 12, color: '#6b7280', padding: '0 4px' }}>
-            Page {logPage.page} of {totalPages}
-          </span>
-          <button
-            onClick={() => fetchPage(logPage.page + 1)}
-            disabled={logPage.page >= totalPages || isPending}
-            style={paginationBtnStyle(logPage.page >= totalPages)}
-          >
-            Next →
-          </button>
+        <div style={{ padding: '0 16px' }}>
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalCount={totalCount}
+            pageSize={15}
+            onPageChange={(p) => {
+              const params = new URLSearchParams(window.location.search)
+              params.set('page', String(p))
+              router.push('?' + params.toString())
+            }}
+          />
         </div>
       </div>
     </div>
@@ -303,14 +281,4 @@ const inputStyle: React.CSSProperties = {
   padding: '6px 10px', fontSize: 13,
   border: '1px solid #d1d5db', borderRadius: 6,
   minWidth: 130, maxWidth: 200,
-}
-
-function paginationBtnStyle(disabled: boolean): React.CSSProperties {
-  return {
-    padding: '5px 12px', fontSize: 12, fontWeight: 500,
-    border: '1px solid #e5e7eb', borderRadius: 6,
-    background: disabled ? '#f9fafb' : '#fff',
-    color: disabled ? '#d1d5db' : '#374151',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-  }
 }

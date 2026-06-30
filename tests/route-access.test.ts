@@ -355,7 +355,9 @@ describe('Phase E stubs — correct role gets 200 for all new role-prefixed rout
     '/superadmin/audit',
     '/superadmin/suppliers',        // Phase 4C
     '/superadmin/purchase-orders',  // Phase 4D
-    '/superadmin/opening-balances', // Phase 13C
+    '/superadmin/opening-balances',       // Phase 13C
+    '/superadmin/ledger/balance-sheet',   // Phase 14B
+    '/superadmin/ledger/trial-balance',   // Phase 14B
   ]
 
   const adminRoutes = [

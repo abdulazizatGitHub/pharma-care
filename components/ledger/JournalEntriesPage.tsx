@@ -4,6 +4,7 @@ import React, { useState, useTransition, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown, ChevronRight, Plus, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { Pagination } from '@/components/ui/Pagination'
 import { ManualEntryModal } from '@/components/ledger/ManualEntryModal'
 import {
   getJournalEntryLines,
@@ -201,14 +202,14 @@ function LinesRow({ lines, colCount }: { lines: JournalLineDisplay[]; colCount: 
 interface Props {
   entries:         JournalEntry[]
   total:           number
+  currentPage:     number
   isSuperadmin:    boolean
   accounts:        Account[]
-  // search param values (so we can reflect in filter fields)
   filterDateFrom:  string
   filterDateTo:    string
   filterStatus:    string
   filterRefType:   string
-  basePath:        string   // e.g. '/superadmin/ledger/journal'
+  basePath:        string
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
@@ -216,6 +217,7 @@ interface Props {
 export function JournalEntriesPage({
   entries,
   total,
+  currentPage,
   isSuperadmin,
   accounts,
   filterDateFrom,
@@ -546,11 +548,17 @@ export function JournalEntriesPage({
         )}
       </div>
 
-      {total > entries.length && (
-        <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, textAlign: 'center' }}>
-          Showing {entries.length} of {total} entries. Use filters to narrow results.
-        </p>
-      )}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={Math.ceil(total / 15)}
+        totalCount={total}
+        pageSize={15}
+        onPageChange={(p) => {
+          const params = new URLSearchParams(window.location.search)
+          params.set('page', String(p))
+          router.push('?' + params.toString())
+        }}
+      />
 
       {/* Reverse modal */}
       {reversingEntry && (

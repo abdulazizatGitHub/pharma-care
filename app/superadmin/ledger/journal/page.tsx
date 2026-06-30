@@ -11,6 +11,7 @@ export default async function SuperadminJournalPage({
     dateTo?:   string
     status?:   string
     refType?:  string
+    page?:     string
   }>
 }) {
   const sp         = await searchParams
@@ -18,6 +19,7 @@ export default async function SuperadminJournalPage({
   const dateTo     = sp.dateTo     ?? ''
   const status     = sp.status     ?? ''
   const refType    = sp.refType    ?? ''
+  const page       = Math.max(1, parseInt(sp.page ?? '1', 10))
 
   const [entriesResult, accountsResult] = await Promise.all([
     getJournalEntries({
@@ -25,8 +27,8 @@ export default async function SuperadminJournalPage({
       dateTo:        dateTo    || undefined,
       status:        status    || undefined,
       referenceType: refType   || undefined,
-      page:     1,
-      pageSize: 20,
+      page,
+      pageSize: 15,
     }),
     (async () => {
       const supabase = await createClient()
@@ -43,6 +45,7 @@ export default async function SuperadminJournalPage({
     <JournalEntriesPage
       entries={entriesResult.data ?? []}
       total={entriesResult.total}
+      currentPage={page}
       isSuperadmin={true}
       accounts={(accountsResult.data ?? []) as Account[]}
       filterDateFrom={dateFrom}

@@ -59,9 +59,9 @@ const NAV_ENTRIES: NavEntry[] = [
   {
     type: 'group', label: 'Accounting', icon: Calculator,
     children: [
-      { href: '/superadmin/ledger',               label: 'Overview (P&L)' },
-      { disabled: true,                            label: 'Balance Sheet' },
-      { disabled: true,                            label: 'Trial Balance' },
+      { href: '/superadmin/ledger',                    label: 'Financial Overview' },
+      { href: '/superadmin/ledger/balance-sheet',       label: 'Balance Sheet' },
+      { href: '/superadmin/ledger/trial-balance',       label: 'Trial Balance' },
       { href: '/superadmin/ledger/cashbook',       label: 'Cash Book' },
       { href: '/superadmin/ledger/journal',        label: 'Journal' },
       { href: '/superadmin/opening-balances',      label: 'Opening Balances' },
@@ -118,24 +118,30 @@ export function SuperadminSidebar({ pharmacyName }: Props) {
   const [groupsOpen, setGroupsOpen] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
-    let stored: Record<string, boolean> = {}
-    try {
-      const raw = localStorage.getItem(SA_STORAGE_KEY)
-      if (raw) stored = JSON.parse(raw) as Record<string, boolean>
-    } catch {}
+    const initial: Record<string, boolean> = {}
+    NAV_ENTRIES.forEach(e => { if (e.type === 'group') initial[e.label] = false })
     const active = getActiveGroupSA(pathname)
-    if (active) stored = { ...stored, [active]: true }
-    setGroupsOpen(stored)
+    if (active) initial[active] = true
+    setGroupsOpen(initial)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const active = getActiveGroupSA(pathname)
-    if (active) setGroupsOpen(prev => ({ ...prev, [active]: true }))
+    if (active) {
+      setGroupsOpen(prev => {
+        const allClosed: Record<string, boolean> = {}
+        Object.keys(prev).forEach(k => { allClosed[k] = false })
+        return { ...allClosed, [active]: true }
+      })
+    }
   }, [pathname])
 
   function toggleGroup(label: string) {
     setGroupsOpen(prev => {
-      const next = { ...prev, [label]: !prev[label] }
+      const wasOpen = !!prev[label]
+      const allClosed: Record<string, boolean> = {}
+      Object.keys(prev).forEach(k => { allClosed[k] = false })
+      const next = { ...allClosed, [label]: !wasOpen }
       try { localStorage.setItem(SA_STORAGE_KEY, JSON.stringify(next)) } catch {}
       return next
     })

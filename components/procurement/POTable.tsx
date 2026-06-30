@@ -1,12 +1,12 @@
 'use client'
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useTransition } from 'react'
 import Link from 'next/link'
-import { useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { ExternalLink, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Pagination } from '@/components/ui/Pagination'
 import { FONT, TEXT, PAGE } from '@/lib/design-tokens'
 import { cancelPO, revertPOToDraft, softDeletePO } from '@/app/actions/procurement'
 import { POStatusBadge } from './POStatusBadge'
@@ -26,11 +26,16 @@ export interface POListRow {
 type StatusFilter = 'all' | POStatus
 
 interface POTableProps {
-  pos:           POListRow[]
-  suppliers:     { id: string; name: string }[]
-  basePath:      string
-  canWrite:      boolean
-  isSuperAdmin?: boolean
+  pos:              POListRow[]
+  suppliers:        { id: string; name: string }[]
+  basePath:         string
+  canWrite:         boolean
+  isSuperAdmin?:    boolean
+  currentPage:      number
+  totalCount:       number
+  pageSize:         number
+  defaultStatus:    string
+  defaultSupplierId: string
 }
 
 const STATUS_TABS: { label: string; value: StatusFilter }[] = [
@@ -48,21 +53,30 @@ const EDITABLE_STATUSES: POStatus[] = ['draft', 'pending_approval', 'confirmed']
 
 type DialogType = 'revert' | 'delete'
 
-export function POTable({ pos, suppliers, basePath, canWrite, isSuperAdmin = false }: POTableProps) {
+export function POTable({
+  pos, suppliers, basePath, canWrite, isSuperAdmin = false,
+  currentPage, totalCount, pageSize, defaultStatus, defaultSupplierId,
+}: POTableProps) {
   const router = useRouter()
-  const [statusFilter,   setStatusFilter]   = useState<StatusFilter>('all')
-  const [supplierFilter, setSupplierFilter] = useState('')
-  const [isPending,      startTransition]   = useTransition()
-  const [actionError,    setActionError]    = useState<string | null>(null)
+  const [isPending,   startTransition] = useTransition()
+  const [actionError, setActionError]  = useState<string | null>(null)
   const [dialog, setDialog] = useState<{ type: DialogType; poId: string } | null>(null)
 
-  const filtered = useMemo(() => {
-    return pos.filter(p => {
-      if (statusFilter !== 'all' && p.status !== statusFilter) return false
-      if (supplierFilter && p.supplier_id !== supplierFilter) return false
-      return true
-    })
-  }, [pos, statusFilter, supplierFilter])
+  const statusFilter   = (defaultStatus as StatusFilter) || 'all'
+  const supplierFilter = defaultSupplierId || ''
+
+  function pushFilters(overrides: Record<string, string>) {
+    const params = new URLSearchParams()
+    const all = {
+      status:     statusFilter === 'all' ? '' : statusFilter,
+      supplierId: supplierFilter,
+      ...overrides,
+    }
+    if (all.status)     params.set('status',     all.status)
+    if (all.supplierId) params.set('supplierId', all.supplierId)
+    // page omitted → resets to 1
+    router.push('?' + params.toString())
+  }
 
   function handleCancel(poId: string) {
     setActionError(null)
@@ -119,7 +133,7 @@ export function POTable({ pos, suppliers, basePath, canWrite, isSuperAdmin = fal
           {STATUS_TABS.map(tab => (
             <button
               key={tab.value}
-              onClick={() => setStatusFilter(tab.value)}
+              onClick={() => pushFilters({ status: tab.value === 'all' ? '' : tab.value })}
               className="text-[11px] font-medium rounded px-3 py-1 transition-colors"
               style={{
                 background: statusFilter === tab.value ? '#ffffff' : 'transparent',
@@ -135,7 +149,7 @@ export function POTable({ pos, suppliers, basePath, canWrite, isSuperAdmin = fal
 
         <select
           value={supplierFilter}
-          onChange={e => setSupplierFilter(e.target.value)}
+          onChange={e => pushFilters({ supplierId: e.target.value })}
           className="h-8 rounded-md border border-[rgba(0,0,0,0.15)] text-[12px] text-[#111827] px-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#0F6E56]"
         >
           <option value="">All suppliers</option>
@@ -166,7 +180,7 @@ export function POTable({ pos, suppliers, basePath, canWrite, isSuperAdmin = fal
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {pos.length === 0 ? (
               <tr>
                 <td
                   colSpan={7}
@@ -176,7 +190,7 @@ export function POTable({ pos, suppliers, basePath, canWrite, isSuperAdmin = fal
                 </td>
               </tr>
             ) : (
-              filtered.map(po => {
+              pos.map(po => {
                 const isEditable         = EDITABLE_STATUSES.includes(po.status)
                 const canEdit            = isEditable && canWrite
                 const canCancel          = (po.status === 'draft' || po.status === 'confirmed') && canWrite
@@ -205,7 +219,6 @@ export function POTable({ pos, suppliers, basePath, canWrite, isSuperAdmin = fal
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
                       <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                        {/* Primary: Edit for editable+canWrite, View otherwise */}
                         {canEdit ? (
                           <Link
                             href={`${basePath}/${po.id}`}
@@ -283,6 +296,20 @@ export function POTable({ pos, suppliers, basePath, canWrite, isSuperAdmin = fal
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={Math.ceil(totalCount / pageSize) || 1}
+        totalCount={totalCount}
+        pageSize={pageSize}
+        onPageChange={(p) => {
+          const params = new URLSearchParams(window.location.search)
+          params.set('page', String(p))
+          router.push('?' + params.toString())
+        }}
+        className="mt-3"
+      />
 
       {/* Revert to Draft confirmation */}
       <ConfirmDialog

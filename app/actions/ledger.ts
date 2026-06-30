@@ -117,6 +117,7 @@ const CustomerPaymentSchema = z.object({
   amount:         z.number().positive('Amount must be positive'),
   payment_date:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   payment_method: z.string().max(50).default('cash'),
+  reference_no:   z.string().max(100).optional(),
   notes:          z.string().max(500).optional(),
 })
 
@@ -239,7 +240,7 @@ export async function getJournalEntries(filters?: {
   if (!canReadLedger(role)) return { data: null, total: 0, error: 'Insufficient permissions' }
 
   const page     = filters?.page     ?? 1
-  const pageSize = filters?.pageSize ?? 20
+  const pageSize = filters?.pageSize ?? 15
   const offset   = (page - 1) * pageSize
 
   let query = supabase
@@ -551,22 +552,19 @@ export async function recordSupplierPayment(input: {
 
 // ─── 8. recordCustomerPayment ─────────────────────────────────────────────────
 // superadmin only.
-// Records an udhaar collection from a customer:
-//   DEBIT  1000 Cash / 1001 Bank        amount  (routed by payment_method)
+// Records an udhaar collection from a customer via the record_customer_payment
+// RPC (migration 033). Atomic: INSERT customer_payments + post_journal_entry
+// (DEBIT 1000/1001, CREDIT 1100 with party_type/party_id) + credit_balance
+// decrement all in one DB transaction.
+//   DEBIT  1000 Cash / 1001 Bank        amount  (routed by payment_method in RPC)
 //   CREDIT 1100 Accounts Receivable     amount  [party: customer]
-// Inserts payment row first (gets its ID), then posts journal entry with
-// p_reference_id=paymentId. Then decrements customers.credit_balance.
-//
-// Note: journal entry and credit_balance decrement are separate operations.
-// Full atomicity requires migration 033 (record_customer_payment RPC).
-// If credit_balance update fails, an error is returned so the caller can alert
-// the user — the payment row and journal entry are already committed.
 
 export async function recordCustomerPayment(input: {
   customer_id:    string
   amount:         number
   payment_date:   string
   payment_method?: string
+  reference_no?:  string
   notes?:         string
 }): Promise<{ data?: { paymentId: string }; error: string | null }> {
   const { supabase, user, role } = await getCallerContext()
@@ -576,7 +574,7 @@ export async function recordCustomerPayment(input: {
   const parsed = CustomerPaymentSchema.safeParse(input)
   if (!parsed.success) return { error: parsed.error.issues[0].message }
 
-  const { customer_id, amount, payment_date, payment_method, notes } = parsed.data
+  const { customer_id, amount, payment_date, payment_method, reference_no, notes } = parsed.data
 
   // Verify customer exists and has sufficient outstanding balance
   const { data: customer } = await supabase
@@ -595,95 +593,30 @@ export async function recordCustomerPayment(input: {
     }
   }
 
-  // Route payment to correct account: cash→1000, bank/cheque→1001
-  const debitAccount =
-    payment_method === 'bank_transfer' ? '1001' :
-    payment_method === 'cheque'        ? '1001' : '1000'
-
-  // Insert payment record first so its ID can be threaded as p_reference_id
-  const { data: payment, error: insertError } = await supabase
-    .from('customer_payments')
-    .insert({
-      customer_id,
-      amount,
-      payment_date,
-      payment_method: payment_method ?? 'cash',
-      notes:          notes ?? null,
-      created_by:     user.id,
+  // Atomic RPC: INSERT customer_payments + journal entry + credit_balance decrement
+  const { data: paymentId, error: rpcError } = await supabase
+    .rpc('record_customer_payment', {
+      p_customer_id:    customer_id,
+      p_amount:         amount,
+      p_payment_method: payment_method ?? 'cash',
+      p_reference_no:   reference_no ?? null,
+      p_notes:          notes ?? null,
+      p_recorded_by:    user.id,
     })
-    .select('id')
-    .single()
 
-  if (insertError || !payment) return { error: insertError?.message ?? 'Failed to save payment record' }
-
-  // Post journal entry: Debit payment account, Credit AR
-  const { data: journalEntryId, error: rpcError } = await supabase.rpc('post_journal_entry', {
-    p_entry_date:     payment_date,
-    p_description:    `Udhaar collection from ${customer.name}`,
-    p_reference_type: 'customer_payment',
-    p_reference_id:   payment.id,
-    p_currency:       'PKR',
-    p_exchange_rate:  1.0,
-    p_lines: [
-      {
-        account_code: debitAccount,
-        direction:    'debit',
-        amount:       amount.toString(),
-        description:  `Cash received from ${customer.name}`,
-      },
-      {
-        account_code: '1100',
-        direction:    'credit',
-        amount:       amount.toString(),
-        party_type:   'customer',
-        party_id:     customer_id,
-        description:  `AR reduction — ${customer.name}`,
-      },
-    ],
-    p_created_by: user.id,
-  })
-
-  if (rpcError || !journalEntryId) return { error: rpcError?.message ?? 'Failed to post journal entry' }
-
-  // Link journal entry back to the payment record
-  const { error: linkError } = await supabase
-    .from('customer_payments')
-    .update({ journal_entry_id: journalEntryId as string })
-    .eq('id', payment.id)
-
-  if (linkError) {
-    console.error('[recordCustomerPayment] journal_entry_id link failed:', linkError.message,
-      '| payment_id:', payment.id, '| je_id:', journalEntryId)
-  }
-
-  // Decrement customer's denormalized credit balance
-  const { error: balanceError } = await supabase
-    .from('customers')
-    .update({
-      credit_balance: Math.max(0, outstanding - amount),
-      updated_at:     new Date().toISOString(),
-    })
-    .eq('id', customer_id)
-
-  if (balanceError) {
-    console.error('[recordCustomerPayment] credit_balance update failed:', balanceError.message,
-      '| payment_id:', payment.id, '| amount:', amount)
-    return {
-      error: `Payment recorded but customer balance update failed. Please contact support. Payment ID: ${payment.id}`,
-    }
-  }
+  if (rpcError) return { error: rpcError.message }
 
   await logAction({
     supabase, userId: user.id, userRole: role,
     action:    ACTION_TYPES.CUSTOMER_PAYMENT,
     tableName: 'customer_payments',
-    recordId:  payment.id,
+    recordId:  paymentId as string,
     newValue:  { customer_id, amount, payment_date, payment_method },
   })
 
   LEDGER_PATHS.forEach(p => revalidatePath(p))
   revalidatePath('/superadmin/ledger/customers')
-  return { data: { paymentId: payment.id as string }, error: null }
+  return { data: { paymentId: paymentId as string }, error: null }
 }
 
 // ─── 9. createBorrowingPharmacy ───────────────────────────────────────────────

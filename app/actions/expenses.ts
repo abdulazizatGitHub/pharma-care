@@ -202,18 +202,23 @@ export async function recordExpense(input: {
 // Returns expenses with account name resolved from the EXPENSE_ACCOUNT_LABELS map.
 // Filters: dateFrom, dateTo, accountCode.
 
-export async function getExpenses(filters?: {
-  dateFrom?:    string
-  dateTo?:      string
-  accountCode?: string
-}): Promise<{ data: ExpenseRow[] | null; error: string | null }> {
+export async function getExpenses(
+  filters?: {
+    dateFrom?:    string
+    dateTo?:      string
+    accountCode?: string
+    search?:      string
+  },
+  page?: number,
+  pageSize?: number,
+): Promise<{ data: ExpenseRow[] | null; total: number; error: string | null }> {
   const { supabase, user, role } = await getCallerContext()
-  if (!user || !role)           return { data: null, error: 'Not authenticated' }
-  if (!canAccessExpenses(role)) return { data: null, error: 'Insufficient permissions' }
+  if (!user || !role)           return { data: null, total: 0, error: 'Not authenticated' }
+  if (!canAccessExpenses(role)) return { data: null, total: 0, error: 'Insufficient permissions' }
 
   let query = supabase
     .from('expenses')
-    .select('*')
+    .select('*', { count: 'exact' })
     .eq('is_deleted', false)
     .order('expense_date', { ascending: false })
     .order('created_at',   { ascending: false })
@@ -221,9 +226,15 @@ export async function getExpenses(filters?: {
   if (filters?.dateFrom)    query = query.gte('expense_date', filters.dateFrom)
   if (filters?.dateTo)      query = query.lte('expense_date', filters.dateTo)
   if (filters?.accountCode) query = query.eq('account_code',  filters.accountCode)
+  if (filters?.search)      query = query.ilike('description', `%${filters.search}%`)
 
-  const { data, error } = await query
-  if (error) return { data: null, error: error.message }
+  if (page !== undefined && pageSize !== undefined) {
+    const offset = (page - 1) * pageSize
+    query = query.range(offset, offset + pageSize - 1)
+  }
+
+  const { data, count, error } = await query
+  if (error) return { data: null, total: 0, error: error.message }
 
   const rows: ExpenseRow[] = ((data ?? []) as Expense[]).map(e => ({
     ...e,
@@ -232,7 +243,7 @@ export async function getExpenses(filters?: {
       : null,
   }))
 
-  return { data: rows, error: null }
+  return { data: rows, total: count ?? rows.length, error: null }
 }
 
 // ─── 3. getExpenseSummary ─────────────────────────────────────────────────────
