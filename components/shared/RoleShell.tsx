@@ -22,7 +22,7 @@ export function RoleShell({ sidebar, userFullName, pharmacyName, children }: Pro
 
   return (
     <POSHeaderProvider>
-    <div className="flex h-screen overflow-hidden bg-[#f0f2f5]">
+    <div className="flex h-screen overflow-hidden bg-[#f0f2f5] print-unclip-1">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-60 focus:px-4 focus:py-2 focus:bg-[#0F6E56] focus:text-white focus:rounded-lg focus:text-sm focus:font-medium"
@@ -45,7 +45,7 @@ export function RoleShell({ sidebar, userFullName, pharmacyName, children }: Pro
         {sidebar}
       </div>
 
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden w-full">
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden w-full print-unclip-2">
         <div className="print:hidden">
           <DashboardHeader
             userFullName={userFullName}
@@ -55,7 +55,7 @@ export function RoleShell({ sidebar, userFullName, pharmacyName, children }: Pro
         </div>
         <main
           id="main-content"
-          className="flex-1 overflow-y-auto min-h-0 w-full"
+          className="flex-1 overflow-y-auto min-h-0 w-full print-unclip-3"
           style={{ padding: '16px 20px' }}
         >
           {children}

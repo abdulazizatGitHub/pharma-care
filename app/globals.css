@@ -55,11 +55,6 @@ body {
 
 /* ─── Print styles ──────────────────────────────────────── */
 @media print {
-  @page {
-    margin: 16mm;
-    size: auto;
-  }
-
   body {
     background-color: white !important;
   }
@@ -82,8 +77,39 @@ body {
   .reports-date-selector,
   .reports-tab-nav { display: none !important; }
 
-  /* Full-width content */
-  main { width: 100% !important; margin: 0 !important; padding: 0 !important; }
+  /* ── Overflow/height reset for the RoleShell scroll container stack ──────
+   * Three elements in RoleShell clip print output to one scrollable viewport.
+   * Structural selectors (body > div) failed — likely a specificity race with
+   * Tailwind's generated rules. Explicit class selectors bypass that entirely.
+   *   .print-unclip-1 — RoleShell root div    (h-screen + overflow-hidden)
+   *   .print-unclip-2 — inner flex wrapper    (overflow-hidden)
+   *   .print-unclip-3 — main#main-content     (overflow-y-auto + min-h-0)
+   * NOTE: these classes are temporary diagnostic markers on RoleShell elements;
+   * they will be cleaned up once the correct fix is confirmed and back-ported. */
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .print-unclip-1,
+  .print-unclip-2,
+  .print-unclip-3 {
+    height: auto !important;
+    overflow: visible !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  /* Full-width content + overflow reset on the scroll container itself */
+  main {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
 
   /* Show print header */
   .reports-print-header { display: block !important; }

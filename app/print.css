@@ -1,0 +1,234 @@
+/*
+ * print.css — Shared print stylesheet for PharmaCare A4 documents.
+ *
+ * Imported exclusively by components/print/PrintDocument.tsx.
+ * This file is the SINGLE source of truth for @page rules in this codebase.
+ * Do NOT add @page declarations to globals.css or any component <style> block.
+ *
+ * Architecture: PrintDocument uses a <table> root with <thead>/<tfoot> so that
+ * the browser's native table-header-group / table-footer-group rendering causes
+ * the header and footer to repeat automatically on every printed page.
+ * This is the only reliable cross-browser technique — no JS pagination needed.
+ *
+ * Known CSS print limitations documented here:
+ *
+ * 1. PAGE NUMBERS: CSS counters give "Page X" (incrementing) but NOT "Page X of Y"
+ *    (total page count is not exposed to CSS). True "X of Y" requires a JS
+ *    pre-render pass to count pages — deferred, out of scope for Phase 15B.
+ *
+ * 2. FIRST-PAGE-ONLY / LAST-PAGE-ONLY header/footer: The table thead/tfoot
+ *    technique inherently repeats on EVERY page. CSS has no reliable mechanism
+ *    to suppress a thead on pages 2+ or a tfoot on all-but-last page without
+ *    a paginated JS renderer (e.g. Paged.js). PrintDocument renders header and
+ *    footer on every page regardless of the logoEveryPage / footerEveryPage
+ *    settings. Those settings are stored and respected in Phase 15B via a
+ *    comment marker — true first/last-only suppression is deferred.
+ */
+
+/* =============================================================================
+   @page — A4 size and margins (SINGLE canonical declaration for this codebase)
+   Slightly larger bottom margin (20mm) to accommodate the repeating footer.
+   ============================================================================= */
+
+@page {
+  size: A4;
+  margin: 15mm 15mm 20mm 15mm;
+}
+
+/* =============================================================================
+   Page numbers — DEFERRED (Phase 15F)
+
+   CSS counters with @page counter-increment are unreliable for repeating tfoot
+   elements across browsers (tested: shows "Page 0" in Chrome). JS beforeprint
+   is also not viable because tfoot is a single DOM element regardless of how
+   many pages print — there is no way to inject per-page numbers into it.
+
+   The correct long-term solution is server-side PDF rendering (Puppeteer /
+   WeasyPrint) which has access to actual page break information. The
+   showPageNumbers PrintSettings field is kept in the DB and interface but
+   PrintDocument does not render anything for it until Phase 15F.
+
+   KNOWN LIMITATION — tfoot bottom-pinning:
+   The tfoot repeats at the bottom of every FULL page via table-footer-group,
+   but on the last (short) page it appears immediately after the last content
+   row rather than pinned to the true A4 bottom. True bottom-pinning on short
+   pages requires JS-based pagination (e.g. Paged.js) — out of scope, accepted.
+   ============================================================================= */
+
+/* =============================================================================
+   Root table — the PrintDocument wrapper element.
+
+   ON SCREEN: renders as a "print preview" card — A4 width, white background,
+   subtle shadow, generous padding to simulate printed margins. Lets the user
+   see roughly what will print before clicking the Print button.
+
+   ON PRINT: pure table layout, full width, no decorative chrome.
+   ============================================================================= */
+
+.print-page-table {
+  width: 100%;
+  max-width: 210mm;   /* A4 width */
+  margin: 0 auto;
+  border-collapse: collapse;
+  background: #ffffff;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 12px;
+  color: #111827;
+  /* Screen-only preview chrome */
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.10), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+@media print {
+  .print-page-table {
+    max-width: 100%;
+    width: 100%;
+    box-shadow: none;
+    border-radius: 0;
+  }
+}
+
+/* thead repeats on every page automatically (browser table-header-group behaviour) */
+.print-page-table thead {
+  display: table-header-group;
+}
+
+/* tfoot repeats on every page automatically (browser table-footer-group behaviour) */
+.print-page-table tfoot {
+  display: table-footer-group;
+}
+
+/* tbody fills remaining page height between header and footer */
+.print-page-table tbody {
+  display: table-row-group;
+}
+
+/* =============================================================================
+   Header cell — logo + pharmacy info + document title block
+   ============================================================================= */
+
+.print-header-cell {
+  padding: 20px 24px 12px;
+}
+
+@media print {
+  .print-header-cell {
+    padding: 0 0 10px;
+    border-bottom: 1.5px solid #d1d5db;
+  }
+}
+
+/* =============================================================================
+   Footer cell — footer text + page number + generated date
+   ============================================================================= */
+
+.print-footer-cell {
+  padding: 10px 24px 20px;
+  font-size: 10px;
+  color: #6b7280;
+  border-top: 1px solid #e5e7eb;
+}
+
+@media print {
+  .print-footer-cell {
+    padding: 6px 0 0;
+    border-top: 1px solid #d1d5db;
+    font-size: 10px;
+    color: #6b7280;
+  }
+}
+
+/* =============================================================================
+   Body cell — the actual document content area
+   ============================================================================= */
+
+.print-body-cell {
+  padding: 0 24px;
+  position: relative;
+  vertical-align: top;
+}
+
+@media print {
+  .print-body-cell {
+    padding: 12px 0 0;
+  }
+}
+
+/* =============================================================================
+   Watermark — centered behind the document body, repeated each page.
+   Uses position:fixed so it appears on every printed page (Chrome/Firefox).
+   Opacity is set via inline style (driven by printSettings.watermarkOpacity).
+   ============================================================================= */
+
+.print-watermark {
+  display: none; /* hidden on screen — watermarks are print-only */
+  pointer-events: none;
+}
+
+/* KNOWN LIMITATION: position:fixed in print only repeats on every page in
+   Chrome/Edge. Firefox renders this only on page 1 due to a longstanding
+   browser bug (https://bugzilla.mozilla.org/show_bug.cgi?id=1372106).
+   No pure-CSS fix exists without a JS pagination library (e.g. Paged.js).
+   Acceptable tradeoff for now — Chrome/Edge are the primary target browsers.
+   position:absolute is NOT a valid alternative here: it positions relative to
+   the entire tbody height (full document), so the watermark would appear once
+   at the document mid-point rather than centered on each page. */
+@media print {
+  .print-watermark {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+    /* opacity set via inline style in PrintDocument component */
+  }
+}
+
+/* Ensure body content renders above the watermark */
+.print-body-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* =============================================================================
+   Page break utilities
+   ============================================================================= */
+
+.print-page-break {
+  page-break-before: always;
+  break-before: page;
+}
+
+.print-avoid-break {
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+/* =============================================================================
+   @media print — strip decorative chrome from all content inside PrintDocument
+   (box-shadow and border-radius render poorly or not at all in most print engines)
+   ============================================================================= */
+
+@media print {
+  .print-page-table * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Ensure tables nested inside the body content don't collapse */
+  .print-body-cell table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .print-body-cell th,
+  .print-body-cell td {
+    padding: 4px 6px;
+  }
+}

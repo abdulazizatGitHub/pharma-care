@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { SettingsPage } from '@/components/superadmin/SettingsPage'
+import { getPrintSettings } from '@/app/actions/settings'
 
 export default async function SuperadminSettingsPage() {
   const supabase = await createClient()
@@ -17,17 +18,20 @@ export default async function SuperadminSettingsPage() {
 
   if (!profile || profile.role !== 'superadmin') redirect('/unauthorized')
 
-  const { data: rows } = await supabase.from('settings').select('key, value')
+  const [settingsResult, printResult] = await Promise.all([
+    supabase.from('settings').select('key, value'),
+    getPrintSettings(),
+  ])
 
   const settings: Record<string, string> = {}
-  for (const row of (rows ?? [])) {
+  for (const row of (settingsResult.data ?? [])) {
     settings[row.key] = row.value
   }
 
   return (
     <div>
       <PageHeader title="Settings" description="Manage pharmacy settings, receipt configuration, and POS behaviour." />
-      <SettingsPage settings={settings} />
+      <SettingsPage settings={settings} printSettings={printResult.data} />
     </div>
   )
 }

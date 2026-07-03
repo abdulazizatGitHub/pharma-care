@@ -1,17 +1,19 @@
 'use client'
 
-import React, { useState } from 'react'
-import { Building2, Receipt, Banknote, ClipboardList, Lock, RotateCcw, LucideIcon } from 'lucide-react'
-import { updateSettings, updateSpecialDiscountSettings } from '@/app/actions/settings'
+import React, { useState, useRef } from 'react'
+import { Building2, Receipt, Banknote, ClipboardList, Lock, RotateCcw, Printer, LucideIcon } from 'lucide-react'
+import { updateSettings, updateSpecialDiscountSettings, updatePrintSettings, uploadPharmacyLogo } from '@/app/actions/settings'
+import type { PrintSettings } from '@/app/actions/settings'
 import { Button } from '@/components/ui/Button'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Props {
-  settings: Record<string, string>
+  settings:      Record<string, string>
+  printSettings: PrintSettings | null
 }
 
-type SectionKey = 'pharmacy' | 'receipt' | 'pos' | 'procurement' | 'returns' | 'fbr'
+type SectionKey = 'pharmacy' | 'receipt' | 'pos' | 'procurement' | 'returns' | 'fbr' | 'print'
 
 // ─── Style constants ──────────────────────────────────────────────────────────
 
@@ -128,6 +130,7 @@ function SectionPanel({
   saved,
   error,
   saveHint,
+  saveLabel = 'Save changes',
 }: {
   title:       string
   description: string
@@ -137,6 +140,7 @@ function SectionPanel({
   saved:       boolean
   error:       string | null
   saveHint?:   string
+  saveLabel?:  string
 }) {
   return (
     <>
@@ -171,7 +175,7 @@ function SectionPanel({
           {error && (
             <span style={{ fontSize: 11, color: '#A32D2D' }}>⚠ {error}</span>
           )}
-          <Button size="sm" onClick={onSave} loading={loading}>Save changes</Button>
+          <Button size="sm" onClick={onSave} loading={loading}>{saveLabel}</Button>
         </div>
       </div>
     </>
@@ -244,10 +248,30 @@ function NavItem({
   )
 }
 
+// ─── Print settings defaults (matches migration 034 seed values) ──────────────
+
+const DEFAULT_PRINT_SETTINGS: PrintSettings = {
+  logoUrl:            '',
+  pharmacyAddress:    '',
+  pharmacyPhone:      '',
+  pharmacyEmail:      '',
+  pharmacyLicense:    '',
+  footerText:         '',
+  logoEveryPage:      false,
+  headerEveryPage:    true,
+  footerEveryPage:    false,
+  showPageNumbers:    true,
+  showGeneratedDate:  true,
+  watermarkLogo:      false,
+  watermarkText:      false,
+  watermarkTextValue: 'CONFIDENTIAL',
+  watermarkOpacity:   8,
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 // Height: 100vh minus shell header (48px), main padding (32px), PageHeader (~68px)
 
-export function SettingsPage({ settings }: Props) {
+export function SettingsPage({ settings, printSettings }: Props) {
   const [active, setActive] = useState<SectionKey>('pharmacy')
 
   const pharmacy    = useSection({
@@ -342,6 +366,52 @@ export function SettingsPage({ settings }: Props) {
     if (result.error) { setSdError(result.error); return }
     setSdSaved(true)
     setTimeout(() => setSdSaved(false), 3000)
+  }
+
+  // ── Print settings local state ─────────────────────────────────────────────
+
+  const [ps, setPs] = useState<PrintSettings>(printSettings ?? DEFAULT_PRINT_SETTINGS)
+  const [psLoading,     setPsLoading]     = useState(false)
+  const [psSaved,       setPsSaved]       = useState(false)
+  const [psError,       setPsError]       = useState<string | null>(null)
+  const [logoUploading, setLogoUploading] = useState(false)
+  const [logoSuccess,   setLogoSuccess]   = useState(false)
+  const [logoError,     setLogoError]     = useState<string | null>(null)
+  const [logoVersion,   setLogoVersion]   = useState(0)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  function psSet<K extends keyof PrintSettings>(key: K, value: PrintSettings[K]) {
+    setPs(prev => ({ ...prev, [key]: value }))
+  }
+
+  async function psSave() {
+    setPsLoading(true); setPsError(null); setPsSaved(false)
+    const result = await updatePrintSettings(ps)
+    setPsLoading(false)
+    if (result.error) { setPsError(result.error); return }
+    setPsSaved(true)
+    setTimeout(() => setPsSaved(false), 3000)
+  }
+
+  async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLogoUploading(true); setLogoError(null); setLogoSuccess(false)
+    const fd = new FormData()
+    fd.append('logo', file)
+    const result = await uploadPharmacyLogo(fd)
+    setLogoUploading(false)
+    if (result.error) { setLogoError(result.error); return }
+    psSet('logoUrl', result.data!.url)
+    setLogoVersion(v => v + 1)
+    setLogoSuccess(true)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    setTimeout(() => setLogoSuccess(false), 3000)
+  }
+
+  async function handleLogoRemove() {
+    const result = await updatePrintSettings({ logoUrl: '' })
+    if (!result.error) psSet('logoUrl', '')
   }
 
   return (
@@ -440,6 +510,28 @@ export function SettingsPage({ settings }: Props) {
             active={active === 'fbr'}
             disabled={true}
             onClick={() => setActive('fbr')}
+          />
+
+          {/* Group: Documents */}
+          <p style={{
+            fontSize: 10,
+            fontWeight: 500,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            color: '#9ca3af',
+            padding: '12px 10px 6px',
+            margin: 0,
+          }}>
+            Documents
+          </p>
+
+          <NavItem
+            icon={Printer}
+            label="Print & Documents"
+            sub="Logo, header, watermark"
+            active={active === 'print'}
+            disabled={false}
+            onClick={() => setActive('print')}
           />
 
         </nav>
@@ -985,6 +1077,373 @@ export function SettingsPage({ settings }: Props) {
               </div>
             </div>
           </>
+        )}
+
+        {/* ── PRINT & DOCUMENT DESIGN ── */}
+        {active === 'print' && (
+          <SectionPanel
+            title="Print & Document Design"
+            description="Configure how pharmacy documents look when printed — Balance Sheet, Ledger, Shift reports, and more."
+            onSave={psSave}
+            loading={psLoading}
+            saved={psSaved}
+            error={psError}
+            saveLabel="Save print settings"
+          >
+
+            {/* ── Logo upload ── */}
+            <div>
+              <label className={LABEL}>Pharmacy logo</label>
+
+              {ps.logoUrl ? (
+                <div style={{ marginBottom: 10 }}>
+                  <img
+                    src={logoVersion > 0 ? `${ps.logoUrl}?v=${logoVersion}` : ps.logoUrl}
+                    alt="Pharmacy logo preview"
+                    style={{
+                      maxWidth: 160,
+                      maxHeight: 80,
+                      border: '1px solid rgba(0,0,0,0.12)',
+                      borderRadius: 6,
+                      objectFit: 'contain',
+                      display: 'block',
+                      padding: 4,
+                      background: '#fafafa',
+                    }}
+                  />
+                </div>
+              ) : (
+                <div
+                  style={{
+                    width: 160,
+                    height: 80,
+                    border: '1px dashed rgba(0,0,0,0.18)',
+                    borderRadius: 6,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 10,
+                    background: '#f8f9fb',
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: '#9ca3af' }}>No logo uploaded</span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={logoUploading}
+                  style={{
+                    height: 30,
+                    padding: '0 12px',
+                    borderRadius: 6,
+                    border: '1px solid rgba(0,0,0,0.15)',
+                    background: '#fff',
+                    color: '#374151',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: logoUploading ? 'not-allowed' : 'pointer',
+                    opacity: logoUploading ? 0.6 : 1,
+                  }}
+                >
+                  {logoUploading ? 'Uploading…' : 'Upload Logo'}
+                </button>
+
+                {ps.logoUrl && (
+                  <button
+                    type="button"
+                    onClick={handleLogoRemove}
+                    style={{
+                      height: 30,
+                      padding: '0 12px',
+                      borderRadius: 6,
+                      border: '1px solid #E5E7EB',
+                      background: '#fff',
+                      color: '#6b7280',
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Remove Logo
+                  </button>
+                )}
+
+                {logoSuccess && (
+                  <span style={{ fontSize: 11, color: '#0F6E56', fontWeight: 500 }}>✓ Logo uploaded</span>
+                )}
+                {logoError && (
+                  <span style={{ fontSize: 11, color: '#A32D2D' }}>⚠ {logoError}</span>
+                )}
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/svg+xml"
+                style={{ display: 'none' }}
+                onChange={handleLogoUpload}
+              />
+
+              <p className={HELPER}>PNG, JPG, or SVG · max 2 MB · raster images resized to fit 800 × 400 px</p>
+            </div>
+
+            <RowDivider />
+
+            {/* ── Pharmacy info ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{
+                fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: '0.06em', color: '#9ca3af', margin: 0,
+              }}>
+                Pharmacy Info
+              </p>
+
+              <Field label="Pharmacy name">
+                <div
+                  style={{
+                    padding: '6px 10px',
+                    background: '#f3f4f6',
+                    border: '1px solid rgba(0,0,0,0.1)',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: '#374151',
+                  }}
+                >
+                  {pharmacyName}
+                </div>
+                <p className={HELPER}>To change the pharmacy name, use the General Settings section above.</p>
+              </Field>
+
+              <Field label="Address">
+                <textarea
+                  value={ps.pharmacyAddress}
+                  onChange={e => psSet('pharmacyAddress', e.target.value)}
+                  rows={2}
+                  placeholder="Street, City, Province"
+                  className={TXTA}
+                />
+              </Field>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <Field label="Phone">
+                  <input
+                    type="text"
+                    value={ps.pharmacyPhone}
+                    onChange={e => psSet('pharmacyPhone', e.target.value)}
+                    placeholder="e.g. 021-1234567"
+                    className={INPUT}
+                  />
+                </Field>
+                <Field label="Email">
+                  <input
+                    type="email"
+                    value={ps.pharmacyEmail}
+                    onChange={e => psSet('pharmacyEmail', e.target.value)}
+                    placeholder="pharmacy@example.com"
+                    className={INPUT}
+                  />
+                </Field>
+              </div>
+
+              <Field label="License / Reg No. (optional)">
+                <input
+                  type="text"
+                  value={ps.pharmacyLicense}
+                  onChange={e => psSet('pharmacyLicense', e.target.value)}
+                  placeholder="e.g. DL-2020-KARACHI-0042"
+                  className={INPUT}
+                />
+              </Field>
+
+              <Field label="Footer text">
+                <textarea
+                  value={ps.footerText}
+                  onChange={e => psSet('footerText', e.target.value)}
+                  rows={3}
+                  placeholder="e.g. Thank you for choosing PharmaCare"
+                  className={TXTA}
+                />
+              </Field>
+            </div>
+
+            <RowDivider />
+
+            {/* ── Document header options ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{
+                fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: '0.06em', color: '#9ca3af', margin: 0,
+              }}>
+                Document Header
+              </p>
+
+              <Field label="Show logo on">
+                <div style={{ display: 'flex', gap: 20, marginTop: 4 }}>
+                  {([
+                    { value: true,  label: 'Every page' },
+                    { value: false, label: 'First page only' },
+                  ] as const).map(opt => (
+                    <label
+                      key={String(opt.value)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: '#374151' }}
+                    >
+                      <input
+                        type="radio"
+                        name="print_logo_every_page"
+                        checked={ps.logoEveryPage === opt.value}
+                        onChange={() => psSet('logoEveryPage', opt.value)}
+                        style={{ accentColor: '#0F6E56' }}
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+
+              <Field label="Show pharmacy info on">
+                <div style={{ display: 'flex', gap: 20, marginTop: 4 }}>
+                  {([
+                    { value: true,  label: 'Every page' },
+                    { value: false, label: 'First page only' },
+                  ] as const).map(opt => (
+                    <label
+                      key={String(opt.value)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: '#374151' }}
+                    >
+                      <input
+                        type="radio"
+                        name="print_header_every_page"
+                        checked={ps.headerEveryPage === opt.value}
+                        onChange={() => psSet('headerEveryPage', opt.value)}
+                        style={{ accentColor: '#0F6E56' }}
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            </div>
+
+            <RowDivider />
+
+            {/* ── Document footer options ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{
+                fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: '0.06em', color: '#9ca3af', margin: 0,
+              }}>
+                Document Footer
+              </p>
+
+              <Field label="Show footer text on">
+                <div style={{ display: 'flex', gap: 20, marginTop: 4 }}>
+                  {([
+                    { value: true,  label: 'Every page' },
+                    { value: false, label: 'Last page only' },
+                  ] as const).map(opt => (
+                    <label
+                      key={String(opt.value)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: '#374151' }}
+                    >
+                      <input
+                        type="radio"
+                        name="print_footer_every_page"
+                        checked={ps.footerEveryPage === opt.value}
+                        onChange={() => psSet('footerEveryPage', opt.value)}
+                        style={{ accentColor: '#0F6E56' }}
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+
+              <RowDivider />
+              <ToggleRow
+                label="Show page numbers"
+                description={'Prints "Page X of Y" in the document footer'}
+                checked={ps.showPageNumbers}
+                onChange={v => psSet('showPageNumbers', v)}
+              />
+              <RowDivider />
+              <ToggleRow
+                label="Show generated date"
+                description="Prints the generation timestamp in the footer"
+                checked={ps.showGeneratedDate}
+                onChange={v => psSet('showGeneratedDate', v)}
+              />
+            </div>
+
+            <RowDivider />
+
+            {/* ── Watermark ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{
+                fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: '0.06em', color: '#9ca3af', margin: 0,
+              }}>
+                Watermark
+              </p>
+
+              <ToggleRow
+                label="Logo watermark (faint background)"
+                description="Shows a semi-transparent logo centered behind the document body."
+                checked={ps.watermarkLogo}
+                onChange={v => psSet('watermarkLogo', v)}
+              />
+              <RowDivider />
+              <ToggleRow
+                label="Text watermark"
+                description={'Shows text (e.g. "CONFIDENTIAL") diagonally across the document.'}
+                checked={ps.watermarkText}
+                onChange={v => psSet('watermarkText', v)}
+              />
+
+              {/* Text input — revealed when text watermark enabled */}
+              <div
+                style={{
+                  maxHeight: ps.watermarkText ? '56px' : '0',
+                  overflow: 'hidden',
+                  transition: 'max-height 0.2s ease',
+                }}
+              >
+                <input
+                  type="text"
+                  value={ps.watermarkTextValue}
+                  onChange={e => psSet('watermarkTextValue', e.target.value)}
+                  placeholder="CONFIDENTIAL"
+                  className={INPUT}
+                />
+              </div>
+
+              <RowDivider />
+
+              <Field label="Watermark opacity">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input
+                    type="range"
+                    min={5}
+                    max={20}
+                    step={1}
+                    value={ps.watermarkOpacity}
+                    onChange={e => psSet('watermarkOpacity', Number(e.target.value))}
+                    style={{ flex: 1, accentColor: '#0F6E56' }}
+                  />
+                  <span style={{ fontSize: 12, color: '#374151', fontWeight: 500, minWidth: 36, textAlign: 'right' }}>
+                    {ps.watermarkOpacity}%
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+                  <span style={{ fontSize: 10, color: '#9ca3af' }}>5% (subtle)</span>
+                  <span style={{ fontSize: 10, color: '#9ca3af' }}>20% (visible)</span>
+                </div>
+              </Field>
+            </div>
+
+          </SectionPanel>
         )}
 
       </div>
