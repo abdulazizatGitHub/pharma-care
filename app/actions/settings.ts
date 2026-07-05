@@ -22,11 +22,15 @@ export async function updateSettings(
     return { error: 'Unauthorized' }
   }
 
+  const now = new Date().toISOString()
   for (const [key, value] of Object.entries(updates)) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('settings')
-      .upsert({ key, value }, { onConflict: 'key' })
+      .update({ value, updated_at: now, updated_by: user.id })
+      .eq('key', key)
+      .select('key')
     if (error) return { error: error.message }
+    if (!data || data.length === 0) return { error: `Setting key '${key}' not found` }
   }
 
   await logAction({
@@ -80,11 +84,15 @@ export async function updateSpecialDiscountSettings(
     special_discount_tiers:   tiers.join(','),
   }
 
+  const now = new Date().toISOString()
   for (const [key, value] of Object.entries(updates)) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('settings')
-      .upsert({ key, value }, { onConflict: 'key' })
+      .update({ value, updated_at: now, updated_by: user.id })
+      .eq('key', key)
+      .select('key')
     if (error) return { error: error.message }
+    if (!data || data.length === 0) return { error: `Setting key '${key}' not found` }
   }
 
   await logAction({
@@ -211,11 +219,15 @@ export async function updatePrintSettings(
     updates[dbKey] = String(value)
   }
 
+  const now = new Date().toISOString()
   for (const [key, value] of Object.entries(updates)) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('settings')
-      .upsert({ key, value }, { onConflict: 'key' })
+      .update({ value, updated_at: now, updated_by: user.id })
+      .eq('key', key)
+      .select('key')
     if (error) return { error: error.message }
+    if (!data || data.length === 0) return { error: `Setting key '${key}' not found` }
   }
 
   await logAction({
@@ -227,6 +239,17 @@ export async function updatePrintSettings(
   })
 
   return { error: null }
+}
+
+// Available to all authenticated roles.
+export async function getPharmacyName(): Promise<string> {
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'pharmacy_name')
+    .single()
+  return data?.value ?? 'PharmaCare'
 }
 
 const ALLOWED_EXTS = ['png', 'jpg', 'jpeg', 'svg'] as const
@@ -295,10 +318,14 @@ export async function uploadPharmacyLogo(
     .from('pharmacy-assets')
     .getPublicUrl(path)
 
-  const { error: settingError } = await supabase
+  const now = new Date().toISOString()
+  const { data: settingData, error: settingError } = await supabase
     .from('settings')
-    .upsert({ key: 'print_logo_url', value: urlData.publicUrl }, { onConflict: 'key' })
+    .update({ value: urlData.publicUrl, updated_at: now, updated_by: user.id })
+    .eq('key', 'print_logo_url')
+    .select('key')
   if (settingError) return { data: null, error: settingError.message }
+  if (!settingData || settingData.length === 0) return { data: null, error: "Setting key 'print_logo_url' not found" }
 
   await logAction({
     supabase,

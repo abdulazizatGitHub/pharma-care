@@ -2,6 +2,8 @@
 
 import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { printDocument } from '@/lib/print-utils'
+import type { PrintSettings } from '@/app/actions/settings'
 
 interface TrialBalanceRow {
   account_code:   string
@@ -15,10 +17,11 @@ interface TrialBalanceRow {
 }
 
 interface Props {
-  rows:         TrialBalanceRow[]
-  fromDate:     string
-  toDate:       string
-  pharmacyName: string
+  rows:          TrialBalanceRow[]
+  fromDate:      string
+  toDate:        string
+  pharmacyName:  string
+  printSettings: PrintSettings
 }
 
 const fmt = (n: number) =>
@@ -73,7 +76,7 @@ const TD: React.CSSProperties = {
   verticalAlign: 'middle',
 }
 
-export function TrialBalancePage({ rows, fromDate, toDate, pharmacyName }: Props) {
+export function TrialBalancePage({ rows, fromDate, toDate, pharmacyName, printSettings }: Props) {
   const router  = useRouter()
   const today   = new Date().toISOString().split('T')[0]
   const [showAll, setShowAll] = useState(true)
@@ -97,33 +100,6 @@ export function TrialBalancePage({ rows, fromDate, toDate, pharmacyName }: Props
 
   return (
     <>
-      {/* Print CSS */}
-      <style>{`
-        @media print {
-          aside, nav, header, [data-print-hide] { display: none !important; }
-          * { overflow: visible !important; }
-          .print-header { display: block !important; }
-          .print-footer { display: block !important; }
-          .trial-table-wrap { max-height: none !important; overflow: visible !important; }
-          body, html { width: 100%; margin: 0; padding: 0; }
-          @page { margin: 20mm; }
-        }
-      `}</style>
-
-      {/* Print header (screen: hidden, print: visible) */}
-      <div className="print-header" style={{ display: 'none' }}>
-        <h1 style={{ fontSize: 18, fontWeight: 700, textAlign: 'center', margin: '0 0 4px' }}>
-          {pharmacyName}
-        </h1>
-        <h2 style={{ fontSize: 14, fontWeight: 600, textAlign: 'center', margin: '0 0 2px' }}>
-          Trial Balance
-        </h2>
-        <p style={{ fontSize: 12, textAlign: 'center', color: '#6b7280', margin: '0 0 16px' }}>
-          Period: {fromDate} to {toDate}
-        </p>
-        <hr style={{ margin: '0 0 16px' }} />
-      </div>
-
       {/* Controls row */}
       <div
         data-print-hide
@@ -170,7 +146,21 @@ export function TrialBalancePage({ rows, fromDate, toDate, pharmacyName }: Props
           <button style={toggleBtn(showAll)}  onClick={() => setShowAll(true)}>All accounts</button>
           <button style={toggleBtn(!showAll)} onClick={() => setShowAll(false)}>Active only</button>
           <button
-            onClick={() => window.print()}
+            onClick={() => {
+              const bodyEl = document.querySelector('.trial-table-wrap')
+              if (!bodyEl) return
+              printDocument({
+                printSettings,
+                pharmacyName,
+                documentTitle: 'Trial Balance',
+                documentSubtitle: `${new Date(fromDate).toLocaleDateString('en-PK', {
+                  day: '2-digit', month: 'long', year: 'numeric',
+                })} to ${new Date(toDate).toLocaleDateString('en-PK', {
+                  day: '2-digit', month: 'long', year: 'numeric',
+                })}`,
+                bodyHtml: bodyEl.innerHTML,
+              })
+            }}
             style={{
               fontSize: 12,
               padding: '4px 12px',
@@ -291,23 +281,6 @@ export function TrialBalancePage({ rows, fromDate, toDate, pharmacyName }: Props
         </table>
       </div>
 
-      {/* Print footer (screen: hidden, print: visible) */}
-      <div
-        className="print-footer"
-        style={{
-          display: 'none',
-          marginTop: 24,
-          borderTop: '1px solid #e5e7eb',
-          paddingTop: 12,
-        }}
-      >
-        <p style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', margin: 0 }}>
-          Generated on {new Date().toLocaleDateString('en-PK', {
-            day: '2-digit', month: 'long', year: 'numeric',
-          })}
-          {' · '}{pharmacyName}{' · '}Confidential
-        </p>
-      </div>
     </>
   )
 }

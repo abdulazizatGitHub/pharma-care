@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { TrialBalancePage } from '@/components/superadmin/TrialBalancePage'
+import { getPrintSettings } from '@/app/actions/settings'
+import { FALLBACK_PRINT_SETTINGS } from '@/lib/print-utils'
 
 export default async function SuperadminTrialBalancePage({
   searchParams,
@@ -32,9 +34,10 @@ export default async function SuperadminTrialBalancePage({
   const fromDate = sp.from ?? firstOfMonth
   const toDate   = sp.to   ?? today
 
-  const [{ data: rows }, { data: pharmacySetting }] = await Promise.all([
+  const [{ data: rows }, { data: pharmacySetting }, printResult] = await Promise.all([
     supabase.rpc('get_trial_balance', { p_from: fromDate, p_to: toDate }),
     supabase.from('settings').select('value').eq('key', 'pharmacy_name').single(),
+    getPrintSettings(),
   ])
 
   const pharmacyName = pharmacySetting?.value ?? 'PharmaCare'
@@ -45,7 +48,13 @@ export default async function SuperadminTrialBalancePage({
         title="Trial Balance"
         description={`${fromDate} to ${toDate}`}
       />
-      <TrialBalancePage rows={rows ?? []} fromDate={fromDate} toDate={toDate} pharmacyName={pharmacyName} />
+      <TrialBalancePage
+        rows={rows ?? []}
+        fromDate={fromDate}
+        toDate={toDate}
+        pharmacyName={pharmacyName}
+        printSettings={printResult.data ?? FALLBACK_PRINT_SETTINGS}
+      />
     </div>
   )
 }

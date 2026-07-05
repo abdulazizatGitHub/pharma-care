@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react'
 import { X, Printer } from 'lucide-react'
 import { getShiftSummary } from '@/app/actions/shifts'
+import { getPrintSettings, getPharmacyName } from '@/app/actions/settings'
+import { printDocument, FALLBACK_PRINT_SETTINGS } from '@/lib/print-utils'
 import type { ShiftRow, ShiftSummaryData } from '@/app/actions/shifts'
 
 function fmtPKR(n: number) {
@@ -11,26 +13,6 @@ function fmtPKR(n: number) {
 
 function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-function printShiftReport(htmlContent: string) {
-  const pw = window.open('', '_blank', 'width=600,height=800')
-  if (!pw) return
-  pw.document.write(`<!DOCTYPE html><html><head><style>
-    body { font-family: sans-serif; font-size: 12px;
-      padding: 24px; max-width: 600px; margin: 0 auto; }
-    .section-title { font-weight: 700; font-size: 10px;
-      text-transform: uppercase; letter-spacing: 0.08em;
-      color: #6b7280; margin: 16px 0 6px; }
-    .row { display: flex; justify-content: space-between;
-      margin-bottom: 3px; }
-    .bold { font-weight: 700; }
-    .divider { border-top: 1px solid #e5e7eb; margin: 8px 0; }
-  </style></head><body>${htmlContent}</body></html>`)
-  pw.document.close()
-  pw.focus()
-  pw.print()
-  pw.close()
 }
 
 function fmtDateTime(iso: string) {
@@ -54,8 +36,9 @@ interface Props {
 }
 
 export function ShiftDetailPanel({ shift, onClose }: Props) {
-  const [summary, setSummary] = useState<ShiftSummaryData | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [summary, setSummary]   = useState<ShiftSummaryData | null>(null)
+  const [loading, setLoading]   = useState(false)
+  const [printing, setPrinting] = useState(false)
 
   useEffect(() => {
     if (!shift) { setSummary(null); return }
@@ -66,75 +49,80 @@ export function ShiftDetailPanel({ shift, onClose }: Props) {
     })
   }, [shift?.id])
 
-  function buildShiftReportHtml(): string {
+  function buildShiftReportBodyHtml(): string {
     if (!shift || !summary) return ''
 
-    const diffVal  = Number(shift.cash_difference ?? 0)
-    const diffSign = diffVal >= 0 ? '+' : ''
+    const diffVal   = Number(shift.cash_difference ?? 0)
+    const diffSign  = diffVal >= 0 ? '+' : ''
     const diffColor = Math.abs(diffVal) > 0.005
-      ? (diffVal < 0 ? 'color:#dc2626' : 'color:#16a34a')
+      ? (diffVal < 0 ? '#dc2626' : '#16a34a')
+      : '#111827'
+
+    const sectionTitle = (t: string) =>
+      `<p style="margin:16px 0 6px;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280">${t}</p>`
+
+    const divider = `<div style="border-top:1px solid #e5e7eb;margin:8px 0"></div>`
+
+    const row = (label: string, value: string, bold = false, color = '#374151') =>
+      `<div style="display:flex;justify-content:space-between;margin-bottom:3px">` +
+      `<span style="color:#6b7280;font-size:12px">${label}</span>` +
+      `<span style="font-weight:${bold ? 700 : 400};color:${color};font-size:12px">${value}</span>` +
+      `</div>`
+
+    const cashierSection = shift.cashier_name
+      ? sectionTitle('Cashier') + row('Name', escHtml(shift.cashier_name))
       : ''
 
-    const timingRows = [
-      `<div class="row"><span>Opened</span><span>${fmtDateTime(shift.opened_at)}</span></div>`,
-      shift.closed_at ? `<div class="row"><span>Closed</span><span>${fmtDateTime(shift.closed_at)}</span></div>` : '',
-      `<div class="row"><span>Duration</span><span>${fmtDuration(shift.opened_at, shift.closed_at)}</span></div>`,
+    const timingSection = sectionTitle('Timing') + [
+      row('Opened',   fmtDateTime(shift.opened_at)),
+      shift.closed_at ? row('Closed', fmtDateTime(shift.closed_at)) : '',
+      row('Duration', fmtDuration(shift.opened_at, shift.closed_at)),
     ].join('')
 
-    const cashierRow = shift.cashier_name
-      ? `<div class="row"><span>Cashier</span><span>${escHtml(shift.cashier_name)}</span></div>`
-      : ''
-
-    const salesRows = [
-      `<div class="row"><span>Cash sales</span><span>${fmtPKR(summary.cashSalesTotal)} (${summary.totalSalesCount} txn)</span></div>`,
-      `<div class="row"><span>Credit sales</span><span>${fmtPKR(summary.creditSalesTotal)}</span></div>`,
-      `<div class="row bold"><span>Total sales</span><span>${fmtPKR(summary.cashSalesTotal + summary.creditSalesTotal)}</span></div>`,
+    const salesSection = sectionTitle('Sales') + [
+      row('Cash sales',   `${fmtPKR(summary.cashSalesTotal)} (${summary.totalSalesCount} txn)`),
+      row('Credit sales', fmtPKR(summary.creditSalesTotal)),
+      row('Total sales',  fmtPKR(summary.cashSalesTotal + summary.creditSalesTotal), true),
       summary.expensesTotal > 0
-        ? `<div class="row"><span>Cash expenses</span><span>− ${fmtPKR(summary.expensesTotal)}</span></div>`
+        ? row('Cash expenses', `− ${fmtPKR(summary.expensesTotal)}`)
         : '',
     ].join('')
 
-    const recoRows = [
-      `<div class="row"><span>Opening cash</span><span>${fmtPKR(Number(shift.opening_cash))}</span></div>`,
-      `<div class="row"><span>+ Cash sales</span><span>${fmtPKR(summary.cashSalesTotal)}</span></div>`,
+    const recoSection = sectionTitle('Cash Reconciliation') + [
+      row('Opening cash',    fmtPKR(Number(shift.opening_cash))),
+      row('+ Cash sales',    fmtPKR(summary.cashSalesTotal)),
       summary.expensesTotal > 0
-        ? `<div class="row"><span>− Cash expenses</span><span>${fmtPKR(summary.expensesTotal)}</span></div>`
+        ? row('− Cash expenses', fmtPKR(summary.expensesTotal))
         : '',
-      `<div class="row bold"><span>Expected cash</span><span>${fmtPKR(summary.expectedCash)}</span></div>`,
+      row('Expected cash',   fmtPKR(summary.expectedCash), true),
       shift.closing_cash != null
-        ? `<div class="row"><span>Actual cash</span><span>${fmtPKR(Number(shift.closing_cash))}</span></div>`
+        ? row('Actual cash', fmtPKR(Number(shift.closing_cash)))
         : '',
       shift.closing_cash != null
-        ? `<div class="row bold" style="${diffColor}"><span>Difference</span><span>${diffSign}${fmtPKR(diffVal)}</span></div>`
+        ? row('Difference',  `${diffSign}${fmtPKR(diffVal)}`, true, diffColor)
         : '',
     ].join('')
 
-    const byHourRows = summary.salesByHour.length > 0
-      ? `<p class="section-title">Sales by Hour</p>` +
+    const byHourSection = summary.salesByHour.length > 0
+      ? sectionTitle('Sales by Hour') +
         summary.salesByHour.map(({ hour, total, count }) =>
-          `<div class="row"><span>${String(hour).padStart(2, '0')}:00</span><span>${fmtPKR(total)} (${count})</span></div>`
+          row(`${String(hour).padStart(2, '0')}:00`, `${fmtPKR(total)} (${count})`)
         ).join('')
       : ''
 
     const notesSection = shift.notes
-      ? `<p class="section-title">Notes</p><p style="margin:0;line-height:1.5">${escHtml(shift.notes)}</p>`
+      ? sectionTitle('Notes') +
+        `<p style="margin:0;line-height:1.5;font-size:12px;color:#374151">${escHtml(shift.notes)}</p>`
       : ''
 
-    return `
-      <p style="margin:0 0 2px;font-size:15px;font-weight:700">Shift Report</p>
-      ${cashierRow}
-      <div class="divider"></div>
-      <p class="section-title">Timing</p>
-      ${timingRows}
-      <div class="divider"></div>
-      <p class="section-title">Sales</p>
-      ${salesRows}
-      <div class="divider"></div>
-      <p class="section-title">Cash Reconciliation</p>
-      ${recoRows}
-      ${byHourRows ? `<div class="divider"></div>${byHourRows}` : ''}
-      ${notesSection ? `<div class="divider"></div>${notesSection}` : ''}
-    `
+    return [
+      cashierSection ? cashierSection + divider : '',
+      timingSection  + divider,
+      salesSection   + divider,
+      recoSection,
+      byHourSection  ? divider + byHourSection : '',
+      notesSection   ? divider + notesSection  : '',
+    ].join('')
   }
 
   const visible = !!shift
@@ -177,10 +165,35 @@ export function ShiftDetailPanel({ shift, onClose }: Props) {
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
-                  onClick={() => printShiftReport(buildShiftReportHtml())}
-                  style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', fontSize: 12, fontWeight: 500, border: '1px solid #d1d5db', borderRadius: 6, background: '#fff', cursor: 'pointer', color: '#374151' }}
+                  disabled={printing}
+                  onClick={async () => {
+                    if (!shift) return
+                    setPrinting(true)
+                    try {
+                      const [psResult, pharmacyName] = await Promise.all([
+                        getPrintSettings(),
+                        getPharmacyName(),
+                      ])
+                      printDocument({
+                        printSettings:    psResult.data ?? FALLBACK_PRINT_SETTINGS,
+                        pharmacyName,
+                        documentTitle:    'Shift Report',
+                        documentSubtitle: `${fmtDateTime(shift.opened_at)} · ${fmtDuration(shift.opened_at, shift.closed_at)}`,
+                        bodyHtml:         buildShiftReportBodyHtml(),
+                      })
+                    } finally {
+                      setPrinting(false)
+                    }
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    padding: '5px 10px', fontSize: 12, fontWeight: 500,
+                    border: '1px solid #d1d5db', borderRadius: 6,
+                    background: '#fff', cursor: printing ? 'wait' : 'pointer',
+                    color: '#374151', opacity: printing ? 0.6 : 1,
+                  }}
                 >
-                  <Printer size={13} /> Print
+                  <Printer size={13} /> {printing ? 'Preparing…' : 'Print'}
                 </button>
                 <button
                   onClick={onClose}

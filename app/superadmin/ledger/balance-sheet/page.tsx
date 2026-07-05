@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { BalanceSheetPage } from '@/components/superadmin/BalanceSheetPage'
+import { getPrintSettings } from '@/app/actions/settings'
+import { FALLBACK_PRINT_SETTINGS } from '@/lib/print-utils'
 
 export default async function SuperadminBalanceSheetPage({
   searchParams,
@@ -26,9 +28,10 @@ export default async function SuperadminBalanceSheetPage({
   const raw   = sp.date ?? ''
   const asOfDate = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : today
 
-  const [{ data: rows }, { data: pharmacySetting }] = await Promise.all([
+  const [{ data: rows }, { data: pharmacySetting }, printResult] = await Promise.all([
     supabase.rpc('get_balance_sheet', { p_as_of_date: asOfDate }),
     supabase.from('settings').select('value').eq('key', 'pharmacy_name').single(),
+    getPrintSettings(),
   ])
 
   const pharmacyName = pharmacySetting?.value ?? 'PharmaCare'
@@ -39,7 +42,12 @@ export default async function SuperadminBalanceSheetPage({
         title="Balance Sheet"
         description={`As of ${asOfDate}`}
       />
-      <BalanceSheetPage rows={rows ?? []} asOfDate={asOfDate} pharmacyName={pharmacyName} />
+      <BalanceSheetPage
+        rows={rows ?? []}
+        asOfDate={asOfDate}
+        pharmacyName={pharmacyName}
+        printSettings={printResult.data ?? FALLBACK_PRINT_SETTINGS}
+      />
     </div>
   )
 }

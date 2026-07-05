@@ -3,6 +3,8 @@
 import React from 'react'
 import { useRouter } from 'next/navigation'
 import { PieChart, Pie, Cell, Tooltip } from 'recharts'
+import { printDocument } from '@/lib/print-utils'
+import type { PrintSettings } from '@/app/actions/settings'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,9 +18,10 @@ interface BalanceSheetRow {
 }
 
 interface Props {
-  rows:         BalanceSheetRow[]
-  asOfDate:     string
-  pharmacyName: string
+  rows:          BalanceSheetRow[]
+  asOfDate:      string
+  pharmacyName:  string
+  printSettings: PrintSettings
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -40,7 +43,7 @@ const SECTION_LABEL: React.CSSProperties = {
   fontWeight: 700,
   letterSpacing: '0.12em',
   textTransform: 'uppercase',
-  color: '#9ca3af',
+  color: '#0F6E56',
   margin: '0 0 12px',
 }
 
@@ -49,7 +52,7 @@ const SECTION_LABEL: React.CSSProperties = {
 function AccountRow({ row }: { row: BalanceSheetRow }) {
   const isNet    = row.account_code === 'NET'
   const isLoss   = isNet && Number(row.balance) < 0
-  const netColor = isNet ? (isLoss ? '#991B1B' : '#166534') : undefined
+  const netColor = isNet ? (isLoss ? '#991B1B' : '#0F6E56') : undefined
 
   const displayName = isNet
     ? (Number(row.balance) >= 0 ? 'Current Period Profit' : 'Current Period Loss')
@@ -79,7 +82,7 @@ function AccountRow({ row }: { row: BalanceSheetRow }) {
           {displayName}
         </div>
         {!isNet && (
-          <div style={{ fontSize: 10, color: '#9ca3af', fontFamily: 'monospace' }}>
+          <div data-print-hide style={{ fontSize: 10, color: '#9ca3af', fontFamily: 'monospace' }}>
             {row.account_code}
           </div>
         )}
@@ -119,7 +122,7 @@ function SectionTotal({ label, total }: { label: string; total: number }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function BalanceSheetPage({ rows, asOfDate, pharmacyName }: Props) {
+export function BalanceSheetPage({ rows, asOfDate, pharmacyName, printSettings }: Props) {
   const router = useRouter()
   const today  = new Date().toISOString().split('T')[0]
 
@@ -150,40 +153,6 @@ export function BalanceSheetPage({ rows, asOfDate, pharmacyName }: Props) {
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px 24px 40px' }}>
 
-      {/* ── Print CSS ──────────────────────────────────────────────────────── */}
-      <style>{`
-        @media print {
-          aside, nav, header, [data-print-hide] { display: none !important; }
-          * { overflow: visible !important; }
-          .print-header { display: block !important; }
-          .print-footer { display: block !important; }
-          .balance-sheet-grid {
-            display: grid !important;
-            grid-template-columns: 1fr 1fr !important;
-          }
-          .balance-sheet-footer {
-            display: grid !important;
-            grid-template-columns: 1fr 1fr !important;
-          }
-          @page { margin: 15mm; }
-          body { font-size: 12px; }
-        }
-      `}</style>
-
-      {/* ── Print header (screen: hidden, print: visible) ──────────────────── */}
-      <div className="print-header" style={{ display: 'none' }}>
-        <p style={{ fontSize: 16, fontWeight: 700, textAlign: 'center', margin: '0 0 2px' }}>
-          {pharmacyName}
-        </p>
-        <p style={{ fontSize: 14, textAlign: 'center', margin: '0 0 2px' }}>
-          Balance Sheet
-        </p>
-        <p style={{ fontSize: 12, textAlign: 'center', color: '#6b7280', margin: '0 0 12px' }}>
-          As of {humanDate(asOfDate)}
-        </p>
-        <hr style={{ margin: '0 0 16px', borderColor: '#e5e7eb' }} />
-      </div>
-
       {/* ── Controls row ───────────────────────────────────────────────────── */}
       <div
         data-print-hide
@@ -209,7 +178,19 @@ export function BalanceSheetPage({ rows, asOfDate, pharmacyName }: Props) {
           }}
         />
         <button
-          onClick={() => window.print()}
+          onClick={() => {
+            const bodyEl = document.querySelector('.balance-sheet-card')
+            if (!bodyEl) return
+            printDocument({
+              printSettings,
+              pharmacyName,
+              documentTitle:    'Balance Sheet',
+              documentSubtitle: `As of ${new Date(asOfDate).toLocaleDateString('en-PK', {
+                day: '2-digit', month: 'long', year: 'numeric',
+              })}`,
+              bodyHtml: bodyEl.innerHTML,
+            })
+          }}
           style={{
             fontSize: 12,
             padding: '4px 12px',
@@ -225,6 +206,7 @@ export function BalanceSheetPage({ rows, asOfDate, pharmacyName }: Props) {
 
       {/* ── Main balance sheet card ────────────────────────────────────────── */}
       <div
+        className="balance-sheet-card"
         style={{
           background: '#fff',
           border: '1px solid #e5e7eb',
@@ -239,10 +221,10 @@ export function BalanceSheetPage({ rows, asOfDate, pharmacyName }: Props) {
             borderBottom: '1px solid #e5e7eb',
           }}
         >
-          <p style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
+          <p data-print-hide style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>
             Balance Sheet
           </p>
-          <p style={{ fontSize: 12, color: '#6b7280', margin: '2px 0 0' }}>
+          <p data-print-hide style={{ fontSize: 12, color: '#6b7280', margin: '2px 0 0' }}>
             As of {humanDate(asOfDate)}
           </p>
         </div>
@@ -303,7 +285,7 @@ export function BalanceSheetPage({ rows, asOfDate, pharmacyName }: Props) {
             >
               Total Assets
             </p>
-            <p style={{ fontSize: 15, fontWeight: 800, color: '#111827', margin: 0, fontVariantNumeric: 'tabular-nums' }}>
+            <p style={{ fontSize: 15, fontWeight: 800, color: isBalanced ? '#0F6E56' : '#111827', margin: 0, fontVariantNumeric: 'tabular-nums' }}>
               {fmt(totalAssets)}
             </p>
           </div>
@@ -326,7 +308,7 @@ export function BalanceSheetPage({ rows, asOfDate, pharmacyName }: Props) {
               style={{
                 fontSize: 15,
                 fontWeight: 800,
-                color: isBalanced ? '#166534' : '#991B1B',
+                color: isBalanced ? '#0F6E56' : '#991B1B',
                 margin: 0,
                 fontVariantNumeric: 'tabular-nums',
               }}
@@ -338,7 +320,7 @@ export function BalanceSheetPage({ rows, asOfDate, pharmacyName }: Props) {
           {/* Balance indicator — full width */}
           <div style={{ gridColumn: '1 / -1', textAlign: 'center', marginTop: 8 }}>
             {isBalanced ? (
-              <span style={{ fontSize: 12, color: '#166534', fontWeight: 600 }}>✓ Balanced</span>
+              <span style={{ fontSize: 12, color: '#0F6E56', fontWeight: 600 }}>✓ Balanced</span>
             ) : (
               <span style={{ fontSize: 12, color: '#991B1B', fontWeight: 600 }}>
                 ⚠ Out of balance by {fmt(difference)}
@@ -347,25 +329,6 @@ export function BalanceSheetPage({ rows, asOfDate, pharmacyName }: Props) {
           </div>
         </div>
 
-        {/* Print footer (screen: hidden, print: visible) */}
-        <div
-          className="print-footer"
-          style={{
-            display: 'none',
-            borderTop: '1px solid #e5e7eb',
-            padding: '12px 28px',
-          }}
-        >
-          <p style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', margin: 0 }}>
-            Generated on {new Date().toLocaleDateString('en-PK', {
-              day: '2-digit', month: 'long', year: 'numeric',
-            })}
-            {' · '}{pharmacyName}{' · '}Confidential
-          </p>
-          <p style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', marginTop: 4 }}>
-            This statement has been prepared from the books of account of the pharmacy.
-          </p>
-        </div>
       </div>
 
       {/* ── Asset composition card (screen only) ──────────────────────────── */}
