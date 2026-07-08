@@ -3,7 +3,7 @@
 import React from 'react'
 import { useRouter } from 'next/navigation'
 import { PieChart, Pie, Cell, Tooltip } from 'recharts'
-import { printDocument } from '@/lib/print-utils'
+import { printDocument, PRINT_STYLES } from '@/lib/print-utils'
 import type { PrintSettings } from '@/app/actions/settings'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -181,14 +181,14 @@ export function BalanceSheetPage({ rows, asOfDate, pharmacyName, printSettings }
           onClick={() => {
             const bodyEl = document.querySelector('.balance-sheet-card')
             if (!bodyEl) return
+            const subtitle = `As of ${new Date(asOfDate).toLocaleDateString('en-PK', { day: '2-digit', month: 'long', year: 'numeric' })}`
+            const titleHtml = `<div style="${PRINT_STYLES.docTitle}">Balance Sheet</div><div style="text-align:center;font-size:12px;color:#6B7280;margin:-14px 0 20px">${subtitle}</div>`
             printDocument({
               printSettings,
               pharmacyName,
               documentTitle:    'Balance Sheet',
-              documentSubtitle: `As of ${new Date(asOfDate).toLocaleDateString('en-PK', {
-                day: '2-digit', month: 'long', year: 'numeric',
-              })}`,
-              bodyHtml: bodyEl.innerHTML,
+              documentSubtitle: subtitle,
+              bodyHtml: titleHtml + bodyEl.innerHTML,
             })
           }}
           style={{

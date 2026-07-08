@@ -42,6 +42,60 @@ function cssStr(s: string): string {
     .replace(/"/g, '\\"')
 }
 
+// =============================================================================
+// Shared design tokens for all print body HTML builders.
+// Every buildXxxBodyHtml() uses these inline-style strings so all reports
+// share the same visual language.
+// =============================================================================
+
+export const PRINT_STYLES = {
+  // Section 1 — Document Title
+  docTitle: 'text-align:center;text-transform:uppercase;letter-spacing:0.05em;font-size:16px;font-weight:700;color:#1F2937;margin:0 0 20px',
+
+  // Section 2 — Metadata block
+  metaTable: 'width:100%;border:1px solid #E5E7EB;border-collapse:separate;border-spacing:0;margin-bottom:20px',
+  metaCellLeft:  'padding:12px 16px;vertical-align:top;width:50%;border-right:1px solid #E5E7EB',
+  metaCellRight: 'padding:12px 16px;vertical-align:top;width:50%',
+  metaLabel: 'color:#6B7280;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px',
+  metaLabelSpaced: 'color:#6B7280;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-top:10px;margin-bottom:2px',
+  metaValueLarge: 'color:#1F2937;font-size:14px;font-weight:600',
+  metaValue: 'color:#1F2937;font-size:13px',
+  metaValueGreen: 'color:#0F6E56;font-size:13px;font-weight:600',
+
+  // Section 3 — Data table
+  dataTable: 'width:100%;border-collapse:collapse;margin-bottom:0',
+  TH:  'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:#374151;padding:8px 12px;border:1px solid #E5E7EB;background:rgba(249,250,251,0.85);text-align:left',
+  THR: 'font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:#374151;padding:8px 12px;border:1px solid #E5E7EB;background:rgba(249,250,251,0.85);text-align:right',
+  TD:  'font-size:12px;color:#1F2937;padding:8px 12px;border:1px solid #E5E7EB;vertical-align:top',
+  TDR: 'font-size:12px;color:#1F2937;padding:8px 12px;border:1px solid #E5E7EB;text-align:right;font-variant-numeric:tabular-nums;vertical-align:top',
+  TDE: 'font-size:12px;color:#9CA3AF;padding:8px 12px;border:1px solid #E5E7EB;text-align:center;vertical-align:top',
+  rowOdd:  'background:#FFFFFF',
+  rowEven: 'background:rgba(250,250,250,0.75)',
+
+  // Section 4 — Summary container
+  summaryWrap:  'border:1px solid #E5E7EB;background:rgba(250,250,250,0.8);padding:16px 20px;margin-top:24px',
+  summaryTitle: 'font-size:11px;text-transform:uppercase;color:#6B7280;letter-spacing:0.05em;border-bottom:1px solid #E5E7EB;padding-bottom:8px;margin-bottom:12px',
+  summaryTable: 'width:100%;border-collapse:collapse',
+  summaryRow: 'padding:4px 0;font-size:13px;color:#374151',
+  summaryRowRight: 'padding:4px 0;font-size:13px;color:#374151;text-align:right;font-variant-numeric:tabular-nums',
+  summaryGrandLeft:  'padding:8px 0 0;font-size:14px;font-weight:700;border-top:1px solid #D1D5DB',
+  summaryGrandRight: 'padding:8px 0 0;font-size:14px;font-weight:700;border-top:1px solid #D1D5DB;text-align:right;font-variant-numeric:tabular-nums',
+
+  // Colours
+  green: '#0F6E56',
+  red:   '#991B1B',
+  gray:  '#6B7280',
+  dark:  '#1F2937',
+}
+
+export function printCurrency(n: number): string {
+  return 'Rs ' + n.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+export function printNumber(n: number): string {
+  return n.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 function buildDocumentHtml(options: {
   printSettings:     PrintSettings
   pharmacyName:      string
@@ -76,9 +130,9 @@ function buildDocumentHtml(options: {
         <img src="${esc(ps.logoUrl)}"
           style="max-width:250px; max-height:250px; opacity:${watermarkOpacity}">` : ''}
       ${showTextWatermark ? `
-        <div style="font-size:48px; font-weight:800; color:#9ca3af;
-          transform:rotate(-30deg); opacity:${watermarkOpacity};
-          white-space:nowrap; user-select:none">
+        <div style="font-size:90px; font-weight:800; color:#6B7280;
+          transform:rotate(-35deg); opacity:${watermarkOpacity};
+          white-space:nowrap; user-select:none; letter-spacing:0.02em">
           ${esc(watermarkText)}
         </div>` : ''}
     </div>` : ''
@@ -99,10 +153,6 @@ function buildDocumentHtml(options: {
 
   const licenseHtml = ps.pharmacyLicense
     ? `<div class="doc-pharmacy-info" style="font-size:10px; color:#9ca3af">License: ${esc(ps.pharmacyLicense)}</div>`
-    : ''
-
-  const subtitleHtml = documentSubtitle
-    ? `<div class="doc-subtitle">${esc(documentSubtitle)}</div>`
     : ''
 
   // ── @page margin box strings — plain text, CSS-escaped via cssStr() ─────────
@@ -236,19 +286,6 @@ function buildDocumentHtml(options: {
     margin-bottom: 8px;
   }
 
-  .doc-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: #111827;
-    margin-top: 8px;
-    margin-bottom: 2px;
-  }
-
-  .doc-subtitle {
-    font-size: 10px;
-    color: #6b7280;
-  }
-
   .doc-body {
     margin-top: 0; /* body padding-top handles the gap below the fixed header */
   }
@@ -268,13 +305,14 @@ function buildDocumentHtml(options: {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    z-index: 0;
+    z-index: 9999;
     pointer-events: none;
   }
 
   .doc-content {
     position: relative;
     z-index: 1;
+    padding: 0 4px;
   }
 
   /* Page break utilities */
@@ -332,8 +370,6 @@ ${watermarkHtml}
       ${addressHtml}
       ${contactHtml}
       ${licenseHtml}
-      <div class="doc-title">${esc(documentTitle)}</div>
-      ${subtitleHtml}
     </div>
   </div>
 
@@ -358,11 +394,23 @@ function openPrintWindow(html: string): void {
   pw.document.write(html)
   pw.document.close()
   pw.focus()
-  // Small delay allows logo image to load before print dialog opens.
+
+  // Wait for all resources (including the pharmacy logo from Supabase CDN) to
+  // finish loading before opening the print dialog. The logo can take >500ms on
+  // a cold request; using onload guarantees it is present in the print output.
   // Do not call pw.close() — let the user close after reviewing or Save as PDF.
-  setTimeout(() => {
+  let printed = false
+  const doPrint = () => {
+    if (printed) return
+    printed = true
     pw.print()
-  }, 500)
+  }
+
+  // Primary: fire when all images + resources are loaded
+  pw.onload = () => setTimeout(doPrint, 200)
+
+  // Fallback: if onload already fired (cached page, no images) or never fires
+  setTimeout(doPrint, 3000)
 }
 
 export function printDocument(options: {

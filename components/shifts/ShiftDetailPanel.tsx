@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react'
 import { X, Printer } from 'lucide-react'
 import { getShiftSummary } from '@/app/actions/shifts'
 import { getPrintSettings, getPharmacyName } from '@/app/actions/settings'
-import { printDocument, FALLBACK_PRINT_SETTINGS } from '@/lib/print-utils'
+import { printDocument, FALLBACK_PRINT_SETTINGS, PRINT_STYLES } from '@/lib/print-utils'
 import type { ShiftRow, ShiftSummaryData } from '@/app/actions/shifts'
 
 function fmtPKR(n: number) {
@@ -69,6 +69,9 @@ export function ShiftDetailPanel({ shift, onClose }: Props) {
       `<span style="font-weight:${bold ? 700 : 400};color:${color};font-size:12px">${value}</span>` +
       `</div>`
 
+    const docTitleHtml = `<div style="${PRINT_STYLES.docTitle}">Shift Report</div>` +
+      `<div style="text-align:center;font-size:12px;color:#6B7280;margin:-14px 0 20px">${fmtDateTime(shift.opened_at)} · ${fmtDuration(shift.opened_at, shift.closed_at)}</div>`
+
     const cashierSection = shift.cashier_name
       ? sectionTitle('Cashier') + row('Name', escHtml(shift.cashier_name))
       : ''
@@ -116,6 +119,7 @@ export function ShiftDetailPanel({ shift, onClose }: Props) {
       : ''
 
     return [
+      docTitleHtml,
       cashierSection ? cashierSection + divider : '',
       timingSection  + divider,
       salesSection   + divider,

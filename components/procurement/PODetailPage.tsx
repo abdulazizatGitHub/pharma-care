@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, CheckCircle, Package, RotateCcw, Trash2, AlertTriangle } from 'lucide-react'
+import { ArrowLeft, CheckCircle, Package, Printer, RotateCcw, Trash2, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -22,18 +22,24 @@ import { GRNForm }          from './GRNForm'
 import type { POStatus }    from '@/lib/db-types'
 import type { GRNSummary, POItemWithReceipt } from '@/app/actions/procurement'
 import type { POItemRow, MedicineLookup }  from './POLineItems'
+import { getPrintSettings, getPharmacyName } from '@/app/actions/settings'
+import { printDocument, FALLBACK_PRINT_SETTINGS, PRINT_STYLES, printNumber, printCurrency } from '@/lib/print-utils'
 import type { GRNLineItem } from './GRNForm'
 
 export interface PODetail {
-  id:             string
-  po_number:      string
-  status:         POStatus
-  total_amount:   number
-  notes:          string | null
-  created_at:     string
-  supplier_name:  string | null
-  rejection_note: string | null
-  shortage_notes: string | null
+  id:               string
+  po_number:        string
+  status:           POStatus
+  total_amount:     number
+  notes:            string | null
+  created_at:       string
+  supplier_name:    string | null
+  supplier_contact: string | null
+  supplier_phone:   string | null
+  supplier_email:   string | null
+  supplier_address: string | null
+  rejection_note:   string | null
+  shortage_notes:   string | null
 }
 
 interface PODetailPageProps {
@@ -174,6 +180,224 @@ function StatusBanner({ status, shortageNotes }: { status: POStatus; shortageNot
   )
 }
 
+// ─── Print helpers ────────────────────────────────────────────────────────────
+
+export const PO_STATUS_LABELS: Record<string, string> = {
+  draft:              'Draft',
+  pending_approval:   'Pending Approval',
+  confirmed:          'Confirmed',
+  partially_received: 'Partially Received',
+  received:           'Fully Received',
+  closed_short:       'Closed (Short)',
+  cancelled:          'Cancelled',
+}
+
+export function buildPOBodyHtml(
+  po:            PODetail,
+  items:         POItemRow[],
+  enrichedItems: POItemWithReceipt[],
+  grnHistory:    GRNSummary[],
+  mode:          'supplier' | 'internal',
+): string {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const S   = PRINT_STYLES
+
+  const formattedDate = new Date(po.created_at).toLocaleDateString('en-PK', {
+    day: 'numeric', month: 'long', year: 'numeric',
+  })
+
+  const STATUS_COLOR: Record<string, string> = {
+    confirmed:          '#2563EB',
+    partially_received: '#D97706',
+    received:           S.green,
+    closed_short:       S.gray,
+    cancelled:          S.red,
+  }
+
+  // Section 1 — Title
+  const docTitle = mode === 'supplier' ? 'Purchase Order' : 'Purchase Order — Internal Copy'
+  const titleHtml = `<div style="${S.docTitle}">${docTitle}</div>`
+
+  // Section 2 — Metadata (PO info left, Supplier right)
+  const statusColor = STATUS_COLOR[po.status] ?? S.dark
+  const leftContent = mode === 'internal'
+    ? `<div style="${S.metaLabel}">PO Number</div>
+       <div style="${S.metaValueLarge}">${esc(po.po_number)}</div>
+       <div style="${S.metaLabelSpaced}">Date</div>
+       <div style="${S.metaValue}">${formattedDate}</div>
+       <div style="${S.metaLabelSpaced}">Status</div>
+       <div style="font-size:13px;font-weight:600;color:${statusColor}">${PO_STATUS_LABELS[po.status] ?? po.status}</div>`
+    : `<div style="${S.metaLabel}">PO Number</div>
+       <div style="${S.metaValueLarge}">${esc(po.po_number)}</div>
+       <div style="${S.metaLabelSpaced}">Date</div>
+       <div style="${S.metaValue}">${formattedDate}</div>`
+
+  const rightContent = po.supplier_name
+    ? `<div style="${S.metaLabel}">Supplier</div>
+       <div style="${S.metaValueLarge}">${esc(po.supplier_name)}</div>
+       ${po.supplier_contact ? `<div style="${S.metaLabelSpaced}">Contact</div><div style="${S.metaValue}">${esc(po.supplier_contact)}</div>` : ''}
+       ${po.supplier_phone   ? `<div style="${S.metaLabelSpaced}">Phone</div><div style="${S.metaValue}">${esc(po.supplier_phone)}</div>` : ''}
+       ${po.supplier_email   ? `<div style="${S.metaLabelSpaced}">Email</div><div style="${S.metaValue}">${esc(po.supplier_email)}</div>` : ''}
+       ${po.supplier_address ? `<div style="${S.metaLabelSpaced}">Address</div><div style="${S.metaValue};white-space:pre-line">${esc(po.supplier_address)}</div>` : ''}`
+    : `<div style="${S.metaValue}">No supplier assigned</div>`
+
+  const metaHtml = `
+    <table style="${S.metaTable}"><tr>
+      <td style="${S.metaCellLeft}">${leftContent}</td>
+      <td style="${S.metaCellRight}">${rightContent}</td>
+    </tr></table>`
+
+  // Section 3 — Line items table
+  let tableHtml = ''
+  let summaryHtml = ''
+
+  if (mode === 'supplier') {
+    let subtotal = 0
+    const rows = items.map((item, i) => {
+      subtotal += item.totalPrice
+      const bg = i % 2 === 0 ? S.rowOdd : S.rowEven
+      return `<tr style="${bg}">
+        <td style="${S.TD};width:32px">${i + 1}</td>
+        <td style="${S.TD}">${esc(item.medicineName)}</td>
+        <td style="${S.TDR};width:70px">${item.quantity}</td>
+        <td style="${S.TDR};width:110px">${printCurrency(item.unitPrice)}</td>
+        <td style="${S.TDR};width:110px">${printCurrency(item.totalPrice)}</td>
+      </tr>`
+    }).join('')
+
+    tableHtml = `
+      <table style="${S.dataTable}">
+        <thead><tr>
+          <th style="${S.TH};width:32px">#</th>
+          <th style="${S.TH}">Medicine</th>
+          <th style="${S.THR};width:70px">Qty</th>
+          <th style="${S.THR};width:110px">Unit Price</th>
+          <th style="${S.THR};width:110px">Total</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`
+
+    summaryHtml = `
+      <div style="${S.summaryWrap}">
+        <div style="${S.summaryTitle}">Summary</div>
+        <table style="${S.summaryTable}">
+          <tr>
+            <td style="${S.summaryGrandLeft};color:${S.green}">Total Amount</td>
+            <td style="${S.summaryGrandRight};color:${S.green}">${printCurrency(subtotal)}</td>
+          </tr>
+        </table>
+      </div>`
+
+  } else {
+    const useEnriched = enrichedItems.length > 0
+    let orderedTotal  = 0
+    let receivedTotal = 0
+
+    const rows = useEnriched
+      ? enrichedItems.map((item, i) => {
+          const remaining = item.ordered_qty - item.received_qty
+          orderedTotal  += item.ordered_qty * item.unit_price
+          receivedTotal += item.received_qty * item.unit_price
+          const itemStatus = item.received_qty >= item.ordered_qty ? 'Received'
+            : item.received_qty > 0 ? `Partial (${item.received_qty}/${item.ordered_qty})`
+            : 'Pending'
+          const itemStatusColor = item.received_qty >= item.ordered_qty ? S.green
+            : item.received_qty > 0 ? '#D97706' : S.gray
+          const bg = i % 2 === 0 ? S.rowOdd : S.rowEven
+          return `<tr style="${bg}">
+            <td style="${S.TD};width:32px">${i + 1}</td>
+            <td style="${S.TD}">${esc(item.medicine_name)}</td>
+            <td style="${S.TDR};width:65px">${item.ordered_qty}</td>
+            <td style="${S.TDR};width:65px">${item.received_qty > 0 ? item.received_qty : '<span style="color:#9CA3AF">—</span>'}</td>
+            <td style="${S.TDR};width:65px">${remaining > 0 ? remaining : '<span style="color:#9CA3AF">—</span>'}</td>
+            <td style="${S.TDR};width:100px">${printCurrency(item.unit_price)}</td>
+            <td style="${S.TDR};width:100px">${printCurrency(item.total_price)}</td>
+            <td style="${S.TD};width:80px;color:${itemStatusColor};font-weight:500">${itemStatus}</td>
+          </tr>`
+        }).join('')
+      : items.map((item, i) => {
+          orderedTotal += item.totalPrice
+          const bg = i % 2 === 0 ? S.rowOdd : S.rowEven
+          return `<tr style="${bg}">
+            <td style="${S.TD};width:32px">${i + 1}</td>
+            <td style="${S.TD}">${esc(item.medicineName)}</td>
+            <td style="${S.TDR};width:65px">${item.quantity}</td>
+            <td style="${S.TDE};width:65px">—</td>
+            <td style="${S.TDE};width:65px">—</td>
+            <td style="${S.TDR};width:100px">${printCurrency(item.unitPrice)}</td>
+            <td style="${S.TDR};width:100px">${printCurrency(item.totalPrice)}</td>
+            <td style="${S.TD};width:80px;color:${S.gray}">Pending</td>
+          </tr>`
+        }).join('')
+
+    tableHtml = `
+      <table style="${S.dataTable}">
+        <thead><tr>
+          <th style="${S.TH};width:32px">#</th>
+          <th style="${S.TH}">Medicine</th>
+          <th style="${S.THR};width:65px">Ordered</th>
+          <th style="${S.THR};width:65px">Received</th>
+          <th style="${S.THR};width:65px">Remaining</th>
+          <th style="${S.THR};width:100px">Unit Price</th>
+          <th style="${S.THR};width:100px">Total</th>
+          <th style="${S.TH};width:80px">Status</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`
+
+    summaryHtml = `
+      <div style="${S.summaryWrap}">
+        <div style="${S.summaryTitle}">Summary</div>
+        <table style="${S.summaryTable}">
+          <tr>
+            <td style="${S.summaryRow}">Ordered Total</td>
+            <td style="${S.summaryRowRight}">${printCurrency(orderedTotal)}</td>
+          </tr>
+          ${useEnriched && receivedTotal > 0 ? `<tr>
+            <td style="${S.summaryRow}">Received Value</td>
+            <td style="${S.summaryRowRight}">${printCurrency(receivedTotal)}</td>
+          </tr>` : ''}
+        </table>
+      </div>`
+  }
+
+  // Notes
+  const notesHtml = po.notes
+    ? `<div style="margin-top:20px;padding:12px 16px;border:1px solid #E5E7EB;border-radius:4px;background:#FAFAFA">
+        <div style="${S.metaLabel};margin-bottom:6px">Notes</div>
+        <div style="font-size:12px;color:#374151;line-height:1.6">${esc(po.notes)}</div>
+       </div>`
+    : ''
+
+  // GRN History (internal only)
+  const grnHtml = mode === 'internal' && grnHistory.length > 0
+    ? `<div style="${S.summaryWrap};margin-top:20px">
+        <div style="${S.summaryTitle}">GRN History</div>
+        <table style="${S.dataTable}">
+          <thead><tr>
+            <th style="${S.TH}">GRN Number</th>
+            <th style="${S.TH}">Date Received</th>
+            <th style="${S.THR}">Amount</th>
+            <th style="${S.TH}">Notes</th>
+          </tr></thead>
+          <tbody>
+            ${grnHistory.map((grn, i) => {
+              const bg = i % 2 === 0 ? S.rowOdd : S.rowEven
+              return `<tr style="${bg}">
+                <td style="${S.TD};font-family:monospace;font-size:11px">${esc(grn.grn_number)}</td>
+                <td style="${S.TD}">${new Date(grn.received_at).toLocaleDateString('en-PK', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                <td style="${S.TDR}">${grn.total_amount != null ? printCurrency(grn.total_amount) : '—'}</td>
+                <td style="${S.TD}">${grn.notes ? esc(grn.notes) : '<span style="color:#9CA3AF">—</span>'}</td>
+              </tr>`
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`
+    : ''
+
+  return titleHtml + metaHtml + tableHtml + summaryHtml + notesHtml + grnHtml
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function PODetailPage({ po, items, medicines, basePath }: PODetailPageProps) {
@@ -196,6 +420,29 @@ export function PODetailPage({ po, items, medicines, basePath }: PODetailPagePro
   // Enriched items (receipt status) for partially_received / received / closed_short
   const [enrichedItems,   setEnrichedItems]   = useState<POItemWithReceipt[]>([])
   const [enrichedLoading, setEnrichedLoading] = useState(false)
+  const [isPrinting,      setIsPrinting]      = useState(false)
+
+  async function handlePrint(mode: 'supplier' | 'internal') {
+    setIsPrinting(true)
+    try {
+      const [psResult, pharmacyName] = await Promise.all([
+        getPrintSettings(),
+        getPharmacyName(),
+      ])
+      printDocument({
+        printSettings:    psResult.data ?? FALLBACK_PRINT_SETTINGS,
+        pharmacyName,
+        documentTitle:    mode === 'supplier' ? 'Purchase Order' : 'Purchase Order — Internal Copy',
+        documentSubtitle: po.po_number,
+        bodyHtml:         buildPOBodyHtml(po, items, enrichedItems, grnHistory, mode),
+        ...(po.status === 'cancelled' && mode === 'internal'
+          ? { watermarkOverride: { enabled: true, text: 'CANCELLED' } }
+          : {}),
+      })
+    } finally {
+      setIsPrinting(false)
+    }
+  }
 
   const needsEnrichedItems = ['partially_received', 'received', 'closed_short'].includes(po.status)
   const canApprove = isSuperAdmin && po.status === 'pending_approval'
@@ -319,6 +566,34 @@ export function PODetailPage({ po, items, medicines, basePath }: PODetailPagePro
             <p className="text-[22px] font-semibold text-[#0F6E56]">
               Rs {po.total_amount.toLocaleString('en-PK', { minimumFractionDigits: 2 })}
             </p>
+            {(() => {
+              const showInternal = !['draft', 'pending_approval'].includes(po.status)
+              const showSupplier = po.status === 'confirmed'
+              if (!showInternal && !showSupplier) return null
+              const btnStyle = {
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '4px 10px', fontSize: 11, fontWeight: 500,
+                border: '1px solid #d1d5db', borderRadius: 6,
+                background: '#fff', cursor: isPrinting ? 'wait' : 'pointer',
+                color: '#374151', opacity: isPrinting ? 0.6 : 1,
+              }
+              return (
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 10 }}>
+                  {showInternal && (
+                    <button onClick={() => handlePrint('internal')} disabled={isPrinting} style={btnStyle}>
+                      <Printer size={11} />
+                      {isPrinting ? 'Preparing…' : 'Internal Copy'}
+                    </button>
+                  )}
+                  {showSupplier && (
+                    <button onClick={() => handlePrint('supplier')} disabled={isPrinting} style={btnStyle}>
+                      <Printer size={11} />
+                      {isPrinting ? 'Preparing…' : 'Supplier Copy'}
+                    </button>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         </div>
       </div>

@@ -49,7 +49,7 @@ const STATUS_TABS: { label: string; value: StatusFilter }[] = [
   { label: 'Closed Short', value: 'closed_short' },
 ]
 
-const EDITABLE_STATUSES: POStatus[] = ['draft', 'pending_approval', 'confirmed']
+const EDITABLE_STATUSES: POStatus[] = ['draft', 'pending_approval']
 
 type DialogType = 'revert' | 'delete'
 
@@ -60,7 +60,7 @@ export function POTable({
   const router = useRouter()
   const [isPending,   startTransition] = useTransition()
   const [actionError, setActionError]  = useState<string | null>(null)
-  const [dialog, setDialog] = useState<{ type: DialogType; poId: string } | null>(null)
+  const [dialog,      setDialog]       = useState<{ type: DialogType; poId: string } | null>(null)
 
   const statusFilter   = (defaultStatus as StatusFilter) || 'all'
   const supplierFilter = defaultSupplierId || ''

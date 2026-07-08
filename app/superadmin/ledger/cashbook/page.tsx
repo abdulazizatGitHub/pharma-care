@@ -1,6 +1,7 @@
 import React from 'react'
 import { getCashBook } from '@/app/actions/ledger'
 import { CashBookDateNav } from '@/components/ledger/CashBookDateNav'
+import { CashBookPrintButton } from '@/components/ledger/CashBookPrintButton'
 import type { CashBookEntry } from '@/app/actions/ledger'
 
 interface TaggedEntry extends CashBookEntry {
@@ -89,7 +90,18 @@ export default async function CashBookPage({
             Cash movements for account 1000
           </p>
         </div>
-        <CashBookDateNav from={from} to={to} basePath="/superadmin/ledger/cashbook" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <CashBookPrintButton
+            from={from}
+            to={to}
+            openingBalance={openingBalance}
+            cashIn={cashIn}
+            cashOut={cashOut}
+            closingBalance={closingBalance}
+            allEntries={allEntries}
+          />
+          <CashBookDateNav from={from} to={to} basePath="/superadmin/ledger/cashbook" />
+        </div>
       </div>
 
       {hasError && (

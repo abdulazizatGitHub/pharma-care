@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { printDocument } from '@/lib/print-utils'
+import { printDocument, PRINT_STYLES } from '@/lib/print-utils'
 import type { PrintSettings } from '@/app/actions/settings'
 
 interface TrialBalanceRow {
@@ -149,16 +149,16 @@ export function TrialBalancePage({ rows, fromDate, toDate, pharmacyName, printSe
             onClick={() => {
               const bodyEl = document.querySelector('.trial-table-wrap')
               if (!bodyEl) return
+              const fromFmt = new Date(fromDate).toLocaleDateString('en-PK', { day: '2-digit', month: 'long', year: 'numeric' })
+              const toFmt   = new Date(toDate).toLocaleDateString('en-PK',   { day: '2-digit', month: 'long', year: 'numeric' })
+              const subtitle = `${fromFmt} to ${toFmt}`
+              const titleHtml = `<div style="${PRINT_STYLES.docTitle}">Trial Balance</div><div style="text-align:center;font-size:12px;color:#6B7280;margin:-14px 0 20px">${subtitle}</div>`
               printDocument({
                 printSettings,
                 pharmacyName,
-                documentTitle: 'Trial Balance',
-                documentSubtitle: `${new Date(fromDate).toLocaleDateString('en-PK', {
-                  day: '2-digit', month: 'long', year: 'numeric',
-                })} to ${new Date(toDate).toLocaleDateString('en-PK', {
-                  day: '2-digit', month: 'long', year: 'numeric',
-                })}`,
-                bodyHtml: bodyEl.innerHTML,
+                documentTitle:    'Trial Balance',
+                documentSubtitle: subtitle,
+                bodyHtml: titleHtml + bodyEl.innerHTML,
               })
             }}
             style={{
