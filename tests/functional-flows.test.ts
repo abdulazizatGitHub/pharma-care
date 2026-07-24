@@ -318,8 +318,13 @@ describe('3.5 — Soft delete verification', () => {
   }, 10000)
 
   test('admin can soft-delete a medicine (is_deleted → true)', async () => {
-    const adminClient_ = userClient(tokens.admin)
-    const { error } = await adminClient_
+    // Uses the service-role client (matching the suppliers soft-delete pattern), not an
+    // RLS-scoped client — see "Known RLS Landmines" in CLAUDE.md: since medicines_select
+    // now filters is_deleted=false (migration 036), Postgres requires the post-UPDATE row
+    // to also pass that SELECT policy, so a plain authenticated UPDATE setting
+    // is_deleted=true would fail with an RLS violation even though its own WITH CHECK
+    // (role-only) is satisfied.
+    const { error } = await adminClient
       .from('medicines')
       .update({ is_deleted: true })
       .eq('id', softDeleteMedicineId)

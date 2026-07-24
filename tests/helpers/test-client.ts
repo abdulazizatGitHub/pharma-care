@@ -1,5 +1,6 @@
 /**
- * Test infrastructure for tests/accounting.test.ts (Phase 16A).
+ * Test infrastructure shared by tests/accounting.test.ts (Phase 16A) and
+ * tests/inventory.test.ts (Phase 16B).
  *
  * Reuses the existing adminClient/signIn helpers from ./clients.ts (service-role
  * client, already wired to .env.local via tests/helpers/setup.ts) rather than
@@ -15,6 +16,19 @@
  * All other test rows (medicines, batches, suppliers, customers, sales,
  * GRNs, returns, payments, expenses) are removed via the service-role client,
  * which bypasses RLS entirely — no pg connection needed for those.
+ *
+ * IMPORTANT — run journal-writing test files with `--runInBand`:
+ * Jest parallelizes multiple test FILES into separate OS worker processes by
+ * default (jest.config.ts sets no maxWorkers). When accounting.test.ts and
+ * inventory.test.ts run together as `npx jest accounting.test.ts inventory.test.ts`
+ * without --runInBand, both processes call post_journal_entry() concurrently
+ * against the same shared dev DB — a genuine cross-process race on its
+ * `SELECT COUNT(*)+1 ... LIKE 'JE-<date>-%'` entry_no generation (not the
+ * within-a-single-file residue issue documented on the `rpc()` retry wrapper
+ * below — this is real concurrency between two Node processes). Confirmed by
+ * reproducing 6 failures with default parallel workers and 0 failures with
+ * `--runInBand` on back-to-back identical runs. Always add --runInBand when
+ * invoking more than one journal-writing test file in the same `npx jest` call.
  */
 
 import { Pool } from 'pg'
@@ -111,6 +125,42 @@ export async function getTestUserIds() {
   return cachedUserIds
 }
 
+/**
+ * Ensures cashierId has an open shift (required by complete_sale() as of
+ * migration 036). Reuses an existing open shift if one exists; only creates
+ * a new one if none does. Returns `created` so the caller's afterAll can
+ * close ONLY the shift it opened itself — never a pre-existing one it merely
+ * reused (which could belong to a real user or another test run).
+ */
+export async function ensureOpenShift(
+  cashierId: string,
+): Promise<{ shiftId: string; created: boolean }> {
+  const { data: existing } = await serviceClient
+    .from('shifts')
+    .select('id')
+    .eq('cashier_id', cashierId)
+    .eq('status', 'open')
+    .maybeSingle()
+  if (existing) return { shiftId: existing.id as string, created: false }
+
+  const { data, error } = await serviceClient
+    .from('shifts')
+    .insert({ cashier_id: cashierId, opening_cash: 0, status: 'open', created_by: cashierId })
+    .select()
+    .single()
+  if (error) throw new Error(`ensureOpenShift failed: ${error.message}`)
+  return { shiftId: data.id as string, created: true }
+}
+
+/** Pairs with ensureOpenShift(): closes the shift only if this test run created it. */
+export async function closeShiftIfCreated(shiftId: string, created: boolean): Promise<void> {
+  if (!created) return
+  await serviceClient
+    .from('shifts')
+    .update({ status: 'closed', closed_at: new Date().toISOString() })
+    .eq('id', shiftId)
+}
+
 // ─── Factories ────────────────────────────────────────────────────────────────
 
 export async function createTestMedicine(overrides: Record<string, unknown> = {}) {
@@ -185,6 +235,60 @@ export async function createTestCustomer(overrides: Record<string, unknown> = {}
     .single()
   if (error || !data) throw new Error(`createTestCustomer failed: ${error?.message}`)
   return data
+}
+
+export async function createTestPO(
+  supplierId: string,
+  items: Array<{ medicine_id: string; quantity: number; unit_price: number }>,
+  overrides: Record<string, unknown> = {},
+) {
+  const totalAmount = items.reduce((sum, i) => sum + i.quantity * i.unit_price, 0)
+  const { data: po, error } = await serviceClient
+    .from('purchase_orders')
+    .insert({
+      po_number:    `${TEST_RUN_ID}PO-${uniqueSuffix()}`,
+      supplier_id:  supplierId,
+      status:       'draft',
+      total_amount: totalAmount,
+      ...overrides,
+    })
+    .select()
+    .single()
+  if (error || !po) throw new Error(`createTestPO failed: ${error?.message}`)
+
+  if (items.length > 0) {
+    const { error: itemsError } = await serviceClient.from('purchase_order_items').insert(
+      items.map(i => ({ po_id: po.id, medicine_id: i.medicine_id, quantity: i.quantity, unit_price: i.unit_price })),
+    )
+    if (itemsError) throw new Error(`createTestPO items failed: ${itemsError.message}`)
+  }
+  return po
+}
+
+/** complete_grn() only requires status IN ('confirmed','partially_received') — this mirrors
+ *  the app's confirmPurchaseOrder() outcome without exercising the approval-threshold workflow. */
+export async function approveTestPO(poId: string) {
+  const { data, error } = await serviceClient
+    .from('purchase_orders')
+    .update({ status: 'confirmed' })
+    .eq('id', poId)
+    .select()
+    .single()
+  if (error || !data) throw new Error(`approveTestPO failed: ${error?.message}`)
+  return data
+}
+
+/** Sum of quantity across all non-deleted, non-expired batches for a medicine. */
+export async function getMedicineStock(medicineId: string): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10)
+  const { data, error } = await serviceClient
+    .from('stock_batches')
+    .select('quantity')
+    .eq('medicine_id', medicineId)
+    .eq('is_deleted', false)
+    .gt('expiry_date', today)
+  if (error) throw new Error(`getMedicineStock failed: ${error.message}`)
+  return (data ?? []).reduce((sum, b) => sum + Number(b.quantity), 0)
 }
 
 // ─── Journal read helpers ───────────────────────────────────────────────────

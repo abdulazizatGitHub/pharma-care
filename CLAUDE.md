@@ -25,6 +25,9 @@ The two affected components when this is built:
 ## Hard rules
 - Phase E MUST delete app/(dashboard)/dashboard/* pages. These are unguarded after Phase C. Do not defer.
 
+## Next action
+Phase 18 — Production Deployment
+
 ## Completed Phases
 - Phase 0: Infrastructure (Supabase, migrations, RLS)
 - Phase 1: Auth + Role routing (3-tier RBAC)
@@ -61,6 +64,31 @@ The two affected components when this is built:
 - Phase 15A: Print System Foundation — migration 034 (15 print_* settings keys with sensible defaults, pharmacy-assets storage bucket [public, 2MB limit, PNG/JPEG/SVG allowed_mime_types], 4 RLS policies on storage.objects: public SELECT, superadmin-only INSERT/UPDATE/DELETE via EXISTS subquery on profiles); app/actions/settings.ts: exported PrintSettings interface (15 camelCase fields), getPrintSettings() [all authenticated roles, single .like('key','print_%') query, boolean coercion + parseFloat mapping], updatePrintSettings(Partial<PrintSettings>) [superadmin only, validates watermarkOpacity ∈ [5,20], upsert loop matching updateSettings() pattern], uploadPharmacyLogo(FormData) [superadmin only, dual ext+MIME validation, sharp resize→PNG 800×400 compressionLevel 8 for raster, raw passthrough for SVG, orphan file cleanup on format change, upserts print_logo_url]; Settings UI: new "Documents" sidebar group + "Print & Documents" NavItem (Printer icon), SectionPanel with saveLabel prop, logo upload/preview/remove with ?v= cache-busting, pharmacy info (address/phone/email/license/footer), header options (2 radio groups), footer options (radio + 2 toggles), watermark (2 toggles + animated text reveal + range slider); page.tsx: Promise.all([settingsQuery, getPrintSettings()]), passes printSettings={printResult.data} (null falls back to DEFAULT_PRINT_SETTINGS); sharp@^0.35.2 added to dependencies (native TS types, no @types package needed). Tests: 148/148 route-access, 54/54 rls-policies, 29/29 functional-flows. Migration 034 pending user execution.
 - Phase 15C: Print popup system — lib/print-utils.ts: printDocument() single export, buildDocumentHtml() builds complete standalone HTML string (inline CSS, no external deps), openPrintWindow() opens 850×1100 popup + setTimeout(print,500) without closing; @page margin boxes for pages 2+ header (@top-left=pharmacyName, @top-right=title—subtitle) and every-page footer (@bottom-left=footerText+generated date, @bottom-right=license); @page :first suppresses margin-box header + reduces margin-top to 5mm (page 1 has full branded in-body header in normal flow); FALLBACK_PRINT_SETTINGS exported constant; getPharmacyName() server action added to app/actions/settings.ts (all roles, reads pharmacy_name key); BalanceSheetPage: Print button → printDocument() using .balance-sheet-card innerHTML, removed @media print <style> block + .print-header + .print-footer divs; TrialBalancePage: same pattern using .trial-table-wrap innerHTML; ShiftDetailPanel: printShiftReport() removed, buildShiftReportHtml() renamed → buildShiftReportBodyHtml() rewritten with inline styles (no class dependencies), printing state + async onClick fetches getPrintSettings()+getPharmacyName() in parallel then calls printDocument(); test page app/superadmin/print-test/ deleted. Tests: 148/148 route-access, 54/54 rls-policies, 29/29 functional-flows.
 - Phase 15D: Business Document Print Views — 4 new A4 print views + design system overhaul applied to all print output. (1) Purchase Order (components/procurement/PODetailPage.tsx): buildPOBodyHtml(mode:'supplier'|'internal'); Supplier Copy = external document (columns: #/Medicine/Pack Size/Qty/Unit Price/Total; watermark suppressed via watermarkOverride:{enabled:false}); Internal Copy = full record (adds Received/Remaining/Status columns + GRN History sub-section; status color-coded in metadata); status gating: draft/pending_approval → no print buttons; confirmed → both copies; partially_received/received/closed_short → Internal Copy only; cancelled → Internal Copy only with CANCELLED watermark override. (2) Supplier Ledger (components/ledger/LedgerSupplierDetailPage.tsx): buildSupplierLedgerBodyHtml(); columns Date/Ref/Description/Debit/Credit/Balance; balance labels 'Payable' (green — we owe supplier) / 'Receivable' (red — supplier owes us) — never Cr/Dr to avoid crore confusion; dual Print (filtered view) + Print Full Ledger buttons; Print disabled when data is empty. (3) Customer Ledger (components/ledger/LedgerCustomerDetailPage.tsx): buildCustomerLedgerBodyHtml(); same pattern, directions inverted ('Receivable' green / 'Payable' red); Outstanding Receivable shown in metadata block. (4) Cash Book (components/ledger/CashBookPrintButton.tsx, new client component wired into app/superadmin/ledger/cashbook/page.tsx): buildCashBookBodyHtml(); metadata: Period left / Opening Balance right; summary block: Opening Balance / Total Receipts / Total Payments / Closing Balance; date-grouped transaction rows. Design system (PRINT_STYLES in lib/print-utils.ts — standard for all future print views): 4-section structure — Section 1: document title (centered, uppercase, letter-spacing); Section 2: 2-column bordered metadata table (gray labels, bold values); Section 3: data table (full cell borders, alternating rgba row shading, right-aligned tabular-nums, em-dash empty cells); Section 4: summary block (rgba background, grand total in brand green); printCurrency() + printNumber() helpers exported; document title moved OUT of pharmacy header → document title is now Section 1 in doc-body (header contains branding only: logo + pharmacy name/address/contact). Bug fixes: openPrintWindow() onload approach (pw.onload + 3s fallback, printed flag prevents double-fire) replaces 500ms fixed timeout — prevents logo missing when Supabase CDN image loads slowly; watermark z-index:9999 so it renders above tables; table/summary backgrounds changed to rgba (0.75–0.85 opacity) so watermark shows through; metaTable border-collapse:separate;border-spacing:0 prevents outer left border halving; .doc-content padding:0 4px prevents sub-pixel clipping at @page 15mm boundary; POTable.tsx removed 'confirmed' from EDITABLE_STATUSES so confirmed POs show View (not Edit) in list; both PO detail pages (superadmin + admin) expand supplier query to join contact_person/phone/email/address from suppliers table. No new migrations (pure frontend). Files: lib/print-utils.ts, components/procurement/PODetailPage.tsx, components/procurement/POTable.tsx, components/ledger/LedgerSupplierDetailPage.tsx, components/ledger/LedgerCustomerDetailPage.tsx, components/ledger/CashBookPrintButton.tsx (new), app/superadmin/purchase-orders/[id]/page.tsx, app/admin/purchase-orders/[id]/page.tsx, app/superadmin/ledger/cashbook/page.tsx. Tests unchanged: 148/148 route-access, 54/54 rls-policies, 29/29 functional-flows (print body builders not exercised by Jest — noted gap, not blocking).
+- Phase 16A: Test Infrastructure + Accounting Tests — tests/helpers/test-client.ts (service-role factories for medicines/batches/suppliers/customers, journal read helpers, pg-based cleanup for the immutable journal_lines/journal_entries tables — temporarily disables journal_lines_immutable + journal_entries_protect_posted by exact tracked UUID only, never by pattern match); tests/accounting.test.ts covers complete_sale/complete_grn/process_return/post_journal_entry/recordExpense/recordSupplierPayment/recordCustomerPayment/borrowing (62 tests). Found 3 real bugs (all confirmed via live pg_get_functiondef reads, not migration files) — see Phase 16A fixes entry below for the resolution: (1) sales.payment_type CHECK only allowed cash/credit despite complete_sale()/process_return() having real bank_transfer/cheque routing logic; (2) complete_grn()'s 2000 AP credit line had no party_type/party_id, so GRNs never appeared in the Supplier Ledger; (3) process_return() never reversed the proportional 4900 Sales Discount, over-refunding customers and permanently understating net revenue after a return on a discounted sale. Also found: record_customer_payment() RPC had no overpayment guard (only the server action checked); two live complete_grn() overloads coexisted (old 4-arg from migration 009 never dropped). 231 pre-existing tests unaffected.
+- Phase 16A fixes: migration 035 (phase16a_accounting_fixes) — Fix 1: sales_payment_type_check widened to ('cash','credit','bank_transfer','cheque'). Fix 2: complete_grn()'s 2000 credit line now carries party_type='supplier'/party_id=v_supplier. Fix 2B: one-time backfill of pre-existing GRN 2000 journal_lines (party_type IS NULL) via goods_receipts.supplier_id, wrapped in a temporary journal_lines_immutable disable inside the same transaction as the rest of the migration (DDL is transactional — any failure rolls back the disable too, so the trigger can never be left off). Fix 3: process_return() now computes v_proportional_discount = ROUND(v_total_refund × (sales.discount_amount / sales.subtotal), 2) for the returned items, credits 4900 for that amount, and drives the cash/bank/AR line off a new v_cash_net = v_net − v_proportional_discount instead of raw v_net — returns.refund_amount/net_amount (and v_net itself) are unchanged, still the gross sticker value already relied on elsewhere. Fix 4: record_customer_payment() now SELECTs credit_balance (previously only an EXISTS check) and RAISEs if p_amount exceeds it. Fix 5: dropped the orphaned complete_grn(UUID,UUID,TEXT,JSONB) 4-arg overload from migration 009; exactly one complete_grn() (5-arg, with p_is_partial) remains. Result: tests/accounting.test.ts 62/62 (was 59/62), rls-policies 54/54, functional-flows 29/29 — no regressions. route-access.test.ts not re-verified this session (localhost:3000 was occupied by an unrelated project's dev server, not touched to avoid repeating an earlier mistake) — migration 035 touches no routing/RLS, so this is a low-risk gap, not a signal of an actual regression.
+- Phase 16B: Inventory Tests — tests/inventory.test.ts (30 tests, no application bugs found — see below for why "bugs" here are really spec-vs-reality mismatches, not defects). New test-client.ts factories: createTestPO/approveTestPO/getMedicineStock. Key finding: complete_sale() has NO FEFO auto-selection, NO auto multi-batch-spanning, and NO expiry check at all — it deducts exactly whatever batch_id the caller supplies, only validating that batch's own quantity and price<=MRP. FEFO (earliest-expiry-first) is implemented purely as a search-result ordering hint in searchMedicinesForPOS()/getTopMedicines() (app/actions/sales.ts): sort valid (non-deleted, non-expired, quantity>0) batches by expiry_date ascending and suggest validBatches[0] — nothing re-validates that the batch_id eventually sent to complete_sale() is actually the earliest one. Those two functions are 'use server' actions needing a live session, so this app-layer FEFO logic is a documented coverage gap, not something Jest exercises. adjustStock()/writeOffBatch() (app/actions/stock.ts, plain server actions, no backing RPC) real signatures: adjustStock(batchId, newQuantity, reason, notes) takes an ABSOLUTE target quantity (not a delta); writeOffBatch(batchId, quantity, reason, notes) decrements by a delta and app-layer-rejects quantity > batch.quantity, with no separate write-off marker on the row (is_deleted stays false; only the audit_logs entry records it happened). stock_batches.quantity has its own CHECK(quantity >= 0) constraint independent of app-layer validation. Discovered running accounting.test.ts + inventory.test.ts together (without --runInBand) causes genuine cross-process entry_no races via Jest's default multi-worker parallelism — see test-runner commands above. Result: 175/175 across rls-policies/functional-flows/accounting/inventory with --runInBand, stable across repeated runs.
+- Phase 16C: Business Rules + Report Tests — tests/business-rules.test.ts (25 tests, later 27 — see Migration 036) + tests/reports.test.ts (12 tests). All 7 bugs from Phase 16 testing fixed in Migration 036 (23 July 2026). See migration file for details. Non-bug note kept: get_cash_book() takes a single p_date, not a date range (spec assumed a range). Result at the time: 219/219 across rls-policies/functional-flows/accounting/inventory/business-rules/reports with --runInBand (route-access.test.ts unaffected — still blocked by the pre-existing port-3000 conflict, not a regression).
+- Phase 16D: Smoke Tests + Test Suite Complete — tests/smoke.test.ts (7 end-to-end scenarios, one per flow: cash sale, GRN, return with stock restore, GRN + supplier payment + party ledger, credit sale + customer payment + party ledger, expense + void, discounted sale + full return). No new bugs found — 16D composes already-validated operations from 16A-16C into full-stack scenarios. All 7 bugs from Phase 16 testing fixed in Migration 036 (23 July 2026). See migration file for details. The discount+return smoke test is a direct regression test for migration 035 Fix 3: confirms 4000/4900/1000 all net to exactly zero across the original sale + full return. tests/README.md added (how to run, why --runInBand is required, env vars, why journal_lines/journal_entries cleanup needs SUPABASE_DB_URL, per-file coverage table, how to add new tests). Test-suite totals as of Migration 036: route-access 148 (blocked by a pre-existing port-3000 conflict, unrelated to Migration 036), rls-policies 54, functional-flows 29, accounting 62, inventory 30, business-rules 27, reports 12, smoke 7 — combined 369 tests, 221 confirmed passing via --runInBand (everything except route-access). Phase 16 (A through D) complete: full-suite command going forward is `npx jest --runInBand`.
+- Phase 17: Auth Security Hardening
+  Tasks completed:
+  - REQ-AUTH-01 (sessions): verified done, no change
+  - REQ-AUTH-02 (CSRF): verified done, no change
+  - REQ-AUTH-03 (rate limiting): deferred, documented
+  - REQ-AUTH-04 (session timeout): verified 3600s JWT
+    expiry, client-side 30min timer already correct
+  - REQ-AUTH-05 (force_password_change): moved to
+    proxy.ts middleware, fires on all requests including
+    Server Action POSTs
+  - REQ-AUTH-06 (auth audit logging): LOGIN/LOGIN_FAILED
+    added to signIn(), ip_address/user_agent added to
+    logAction() for all auth events
+  - REQ-AUTH-07 (service role key): verified done,
+    no change
+  - Password policy: verified done, documented
+  - Legacy routes: documented in CLAUDE.md, no code change
+  Files changed: proxy.ts, app/actions/auth.ts, lib/audit.ts
+  Migration: none required
+  Tests: 221/221 confirmed via --runInBand, no new tests added, no regressions across all 4 tasks.
 
 ## Deferred: Phase 12 — Shift Management & Cash Accountability (future phases)
 - Phase 12B: Cash Out at POS — F10 shortcut (hidden unless phase12_cash_out_enabled='true'), CashOutModal with category radio + daily-limit enforcement, expense recording via existing recordExpense(), shift_id + cash_out_reason populated
@@ -92,9 +120,22 @@ Deferred until borrow flow supports a global entry point.
 
 ## Known Conventions
 Test runner: Jest (not Vitest)
-  npx jest tests/route-access.test.ts      → 148/148
+  npx jest tests/route-access.test.ts      → 148/148 (requires npm run dev on localhost:3000)
   npx jest tests/rls-policies.test.ts      → 54/54
   npx jest tests/functional-flows.test.ts  → 29/29
+  npx jest tests/accounting.test.ts        → 62/62 (talks directly to Supabase; no dev server needed)
+  npx jest tests/inventory.test.ts         → 30/30 (same — no dev server needed)
+  npx jest tests/business-rules.test.ts    → 27/27 (same — no dev server needed)
+  npx jest tests/reports.test.ts           → 12/12 (same — no dev server needed)
+  npx jest tests/smoke.test.ts             → 7/7 (same — no dev server needed)
+  Full suite (except route-access, which needs npm run dev on :3000):
+    npx jest tests/rls-policies.test.ts tests/functional-flows.test.ts tests/accounting.test.ts tests/inventory.test.ts tests/business-rules.test.ts tests/reports.test.ts tests/smoke.test.ts --runInBand
+    → 221/221 (369 total including route-access). See tests/README.md for full details on running tests, env vars, and adding new ones.
+  Running more than one journal-writing file together (accounting/inventory) REQUIRES --runInBand:
+  Jest's default multi-worker mode runs test files as separate OS processes, which genuinely
+  race on post_journal_entry()'s entry_no generation against the shared dev DB. Single-file
+  runs don't need it. e.g.:
+    npx jest tests/accounting.test.ts tests/inventory.test.ts --runInBand
 
 Special discount flow:
   Settings define tiers (comma string) + type + enabled flag
@@ -119,6 +160,8 @@ GenericComparisonWizard architecture:
   032 = phase13a_accounting_fixes (account 4900, rename 1001, fix complete_grn/complete_sale/process_return),
   033 = phase14a_financial_statements (customer_payments.reference_no, get_trial_balance, get_balance_sheet, record_customer_payment RPC).
   034 = phase15a_print_system (15 print_* settings keys, pharmacy-assets storage bucket + RLS) — pending user execution.
+  035 = phase16a_accounting_fixes (sales_payment_type_check widened to include bank_transfer/cheque; complete_grn 2000 line + backfill gets party_type/party_id; process_return reverses 4900 proportionally; record_customer_payment overpayment guard; dropped orphaned 4-arg complete_grn overload).
+  036 = Migration 036 — 7 bug fixes (BUG-1 through BUG-7): report reversal double-count, expired batch sale, audit_logs immutability trigger, medicines_select RLS is_deleted filter, PO status transition trigger, complete_sale() shift check, opening balance unique index.
 
 Sidebar collapsible groups:
   localStorage key pattern: 'sidebar_[section]_expanded'
@@ -130,6 +173,103 @@ Sidebar collapsible groups:
 - purchase_order_items DELETE policy: role-only check.
   Status guard (draft only) enforced at app layer in
   removePOItem(). Direct API calls bypass this check.
+
+## Known RLS Landmines
+- medicines_select RLS (is_deleted = false, added migration 036):
+  PostgreSQL applies the SELECT policy's USING clause to the
+  post-UPDATE row state, not just the UPDATE policy's WITH CHECK.
+  Any authenticated-client UPDATE that sets is_deleted = true will
+  fail with an RLS violation because the resulting row fails the
+  SELECT policy. Soft-deleting a medicine must be done via service
+  role or a SECURITY DEFINER RPC — never via a plain authenticated
+  client call. (No medicine-delete feature exists yet — this note
+  is for whoever builds one.)
+
+## Legacy Routes — Known Debt
+
+Six legacy route directories exist that predate the current 
+Supabase architecture:
+app/dashboard, app/expenses, app/inventory,
+app/reports, app/sales, app/bulk-upload
+
+Current state: these routes self-protect accidentally because 
+AppLayout reads from localStorage key 'pharmacy_auth' which 
+nothing in the current codebase writes. Any real user is 
+immediately redirected to /login on mount. They are NOT in 
+proxy.ts routeRoles and must NOT be added until they are 
+rebuilt on Supabase.
+
+These routes use:
+- components/layout/AppLayout.tsx (legacy shell, not the 
+  real role layouts)
+- components/layout/Sidebar.tsx (old sidebar, hard-codes 
+  all 6 paths — not imported by any real role layout)
+- services/storage.ts (localStorage reads/writes)
+- services/{medicine,sales,expense}Service.ts (localStorage)
+
+All of this violates CLAUDE.md hard rule: 
+"No localStorage for any business data."
+
+When rebuilding any of these routes:
+1. Replace all localStorage/services/storage.ts usage with 
+   real Supabase queries and app/actions/
+2. Add the route to proxy.ts routeRoles with correct role 
+   restrictions BEFORE connecting real data
+3. force_password_change check is inherited from proxy.ts 
+   middleware automatically (added in Phase 17, Task 1)
+4. Delete components/layout/AppLayout.tsx and 
+   components/layout/Sidebar.tsx once ALL six routes are 
+   rebuilt — not before, as they are shared across all six
+
+Do not add route guards to these routes in their current 
+state — guarding localStorage-backed pages would make 
+broken pages accessible to real users.
+
+## Auth Configuration — Verified (Phase 17, 23 July 2026)
+
+JWT expiry: 3600 seconds (1 hour)
+- Verified in Supabase dashboard → Settings → JWT Keys
+- Matches Supabase recommendation, no change required
+
+API keys: migrated to publishable/secret key system
+- Code uses NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY 
+  (not legacy NEXT_PUBLIC_SUPABASE_ANON_KEY)
+- lib/supabase/server.ts and lib/supabase/client.ts both 
+  use PUBLISHABLE_KEY — confirmed in Phase 17 audit
+- Legacy ANON_KEY may still exist in .env.local but is 
+  not used by any code path
+
+Client-side inactivity timeout: 30 minutes
+- Implemented in lib/session-timeout.tsx
+- Wired into all 3 role layouts (admin, pharmacist, 
+  superadmin)
+- Configurable via settings table
+- This is separate from JWT expiry — it fires on idle, 
+  not on token expiry
+
+Rate limiting: deferred
+- Not implemented (no package, no middleware code)
+- Supabase free-tier built-in limits provide minimal floor
+- Deferred: single-branch deployment, staff-only accounts,
+  no self-signup
+- When implementing: use Upstash Redis in middleware
+- Required before any multi-branch or public-facing expansion
+
+## Phase 18 Deployment Checklist (pre-populated)
+
+After first real login on production Vercel deployment,
+verify auth audit logging captures real IP and user agent:
+
+  SELECT action, ip_address, user_agent, created_at
+  FROM audit_logs
+  WHERE action IN ('LOGIN', 'LOGIN_FAILED', 'LOGOUT')
+  ORDER BY created_at DESC
+  LIMIT 3;
+
+Expected: ip_address and user_agent non-null.
+If null: x-forwarded-for header not being injected by 
+Vercel — check Vercel project settings → Headers.
+This was not verifiable in local dev (no reverse proxy).
 
 ## Phase 4 Rules — Supplier & Procurement
 - GRN creation must use complete_grn() RPC for atomicity.
@@ -183,17 +323,34 @@ This is intentional for MVP. After all modules are complete and tested, this wil
     credit sale   → 1100 Accounts Receivable
   Any function or server action posting a payment journal line MUST use this
   routing — never hardcode 1000 for non-cash payment types.
+  sales.payment_type CHECK only allowed ('cash','credit') until migration 035
+  — bank_transfer/cheque sales would fail at INSERT despite complete_sale()/
+  process_return() already having the routing logic above. Fixed in 035;
+  the POS UI (CheckoutModal.tsx) still only offers cash/credit as of this
+  writing, so bank_transfer/cheque sales require a direct RPC call or future
+  UI work, not yet reachable from the checkout screen.
 - Account 4900 Sales Discount: contra-revenue, normal_balance='debit', is_system=true.
   complete_sale() posts CREDIT 4000 = gross subtotal, DEBIT 4900 = p_discount_amt
   (only if > 0). Pre-032 entries show netted revenue in 4000 — immutable, accepted.
 - complete_grn() posts DEBIT 1200 / CREDIT 2000 per GRN (full or partial).
   The 2000 AP line carries party_type='supplier', party_id=v_supplier for the
   supplier ledger. Guard: IF v_total > 0 (zero-value GRNs skip journal posting).
+  This party_type/party_id was NOT actually present in the code until migration
+  035 (Phase 13A's changelog claimed it was fixed in 032; it wasn't — confirmed
+  via a failing accounting.test.ts assertion in Phase 16A). 035 also backfilled
+  pre-existing GRN 2000 lines, so all GRNs (old and new) now show in the
+  Supplier Ledger.
 - process_return() routes the refund/receivable line by original sale payment_type:
-    cash/bank   v_net > 0 → CREDIT 1000/1001 (cash out)
-    cash/bank   v_net < 0 → DEBIT  1000/1001 (cash in, exchange upgrade)
-    credit sale v_net > 0 → CREDIT 1100 (reduce receivable — customer owes less)
-    credit sale v_net < 0 → DEBIT  1100 (increase receivable — customer owes more)
+    cash/bank   v_cash_net > 0 → CREDIT 1000/1001 (cash out)
+    cash/bank   v_cash_net < 0 → DEBIT  1000/1001 (cash in, exchange upgrade)
+    credit sale v_cash_net > 0 → CREDIT 1100 (reduce receivable — customer owes less)
+    credit sale v_cash_net < 0 → DEBIT  1100 (increase receivable — customer owes more)
+  Since migration 035, v_cash_net = v_net − v_proportional_discount (not raw
+  v_net): the return also credits 4900 for the proportional slice of the
+  original sale's discount attributable to the returned items, and refunds
+  cash/AR net of that slice. returns.refund_amount/net_amount (and the raw
+  v_net used to compute them) are unchanged — still the gross sticker value
+  of the returned items, not the discount-adjusted cash amount.
 
 ## Future: Auth security hardening (out of scope for MVP)
 The following improvements are planned after all modules are complete and stable.
@@ -203,3 +360,8 @@ Do NOT implement these until a separate spec document is written and approved.
 - Separate short-lived access tokens + long-lived refresh tokens
   (current @supabase/ssr uses a single rolling JWT — acceptable for MVP)
 - Rate-limiting on /login and /change-password endpoints
+JWT expiry: 3600 seconds (1 hour) — verified 23 July 2026.
+Matches Supabase recommendation. No change required.
+Client-side inactivity timeout: 30 minutes (lib/session-timeout.tsx).
+API keys: migrated to publishable/secret key system 
+(NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in use, not legacy anon key).

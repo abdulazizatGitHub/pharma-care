@@ -14,6 +14,7 @@ export const ACTION_TYPES = {
   UPDATE_PERMISSIONS:        'UPDATE_PERMISSIONS',
   SPECIAL_DISCOUNT_GRANTED:  'SPECIAL_DISCOUNT_GRANTED',
   LOGIN:                'LOGIN',
+  LOGIN_FAILED:         'LOGIN_FAILED',
   LOGOUT:               'LOGOUT',
 
   // Medicine master
@@ -100,17 +101,19 @@ export type ActionType = typeof ACTION_TYPES[keyof typeof ACTION_TYPES]
 
 interface LogActionParams {
   supabase:   SupabaseClient
-  userId:     string
-  userRole:   UserRole
+  userId:     string | null
+  userRole:   UserRole | null
   action:     ActionType
   tableName?: string
   recordId?:  string
   oldValue?:  Record<string, unknown>
   newValue?:  Record<string, unknown>
+  ipAddress?: string | null
+  userAgent?: string | null
 }
 
 export async function logAction(params: LogActionParams): Promise<void> {
-  const { supabase, userId, userRole, action, tableName, recordId, oldValue, newValue } = params
+  const { supabase, userId, userRole, action, tableName, recordId, oldValue, newValue, ipAddress, userAgent } = params
 
   const { error } = await supabase.from('audit_logs').insert({
     user_id:    userId,
@@ -120,6 +123,8 @@ export async function logAction(params: LogActionParams): Promise<void> {
     record_id:  recordId,
     old_value:  oldValue ?? null,
     new_value:  newValue ?? null,
+    ip_address: ipAddress ?? null,
+    user_agent: userAgent ?? null,
   })
 
   // Never throw on audit failure — log errors to console only.

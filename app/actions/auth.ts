@@ -1,10 +1,21 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { getDefaultRoute, ROLE_HOME } from '@/lib/routes'
 import type { UserRole } from '@/lib/db-types'
 import { logAction, ACTION_TYPES } from '@/lib/audit'
+
+// Request metadata for audit logging — never throws, falls back to null.
+async function getRequestMeta(): Promise<{ ip: string | null; userAgent: string | null }> {
+  const headersList = await headers()
+  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim()
+    ?? headersList.get('x-real-ip')
+    ?? null
+  const userAgent = headersList.get('user-agent') ?? null
+  return { ip, userAgent }
+}
 
 export async function signIn(
   _prevState: { error: string } | null,
@@ -17,6 +28,17 @@ export async function signIn(
 
   const { error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) {
+    const { ip, userAgent } = await getRequestMeta()
+    await logAction({
+      supabase,
+      userId:    null,
+      userRole:  null,
+      action:    ACTION_TYPES.LOGIN_FAILED,
+      tableName: 'auth',
+      newValue:  { description: 'Failed login attempt' },
+      ipAddress: ip,
+      userAgent,
+    })
     return { error: 'Incorrect email or password. Please try again.' }
   }
 
@@ -32,6 +54,21 @@ export async function signIn(
   if (!profile) {
     await supabase.auth.signOut()
     redirect(`/unauthorized?message=${encodeURIComponent('Profile not found. Contact administrator.')}`)
+  }
+
+  {
+    const { ip, userAgent } = await getRequestMeta()
+    await logAction({
+      supabase,
+      userId:    user.id,
+      userRole:  profile.role as UserRole,
+      action:    ACTION_TYPES.LOGIN,
+      tableName: 'auth',
+      recordId:  user.id,
+      newValue:  { role: profile.role },
+      ipAddress: ip,
+      userAgent,
+    })
   }
 
   if (!profile.is_active) {
@@ -60,6 +97,7 @@ export async function signOut(): Promise<never> {
       .eq('id', user.id)
       .single()
 
+    const { ip, userAgent } = await getRequestMeta()
     await logAction({
       supabase,
       userId:    user.id,
@@ -68,6 +106,8 @@ export async function signOut(): Promise<never> {
       tableName: 'auth',
       recordId:  user.id,
       newValue:  { role: profile?.role ?? 'unknown' },
+      ipAddress: ip,
+      userAgent,
     })
 
     await supabase.auth.signOut()

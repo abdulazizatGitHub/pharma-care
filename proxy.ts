@@ -24,7 +24,7 @@ export async function proxy(request: NextRequest) {
   // user_metadata.role is not kept in sync by migrations or by any current server action.
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, force_password_change')
     .eq('id', user.id)
     .single()
   const role: string | undefined = profile?.role ?? undefined
@@ -35,6 +35,12 @@ export async function proxy(request: NextRequest) {
       url.pathname = '/unauthorized'
       return NextResponse.redirect(url)
     }
+  }
+
+  if (profile?.force_password_change) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/change-password'
+    return NextResponse.redirect(url)
   }
 
   return supabaseResponse

@@ -21,12 +21,13 @@ import {
   serviceClient, rpc, TEST_RUN_ID, getTestUserIds, uniqueSuffix,
   createTestMedicine, createTestBatch, createTestSupplier, createTestCustomer,
   getJournalEntry, getJournalEntryById, getJournalLines, findLine, assertBalanced, computeBalance,
-  getBatchQty, cleanupJournalEntries, closePool,
+  getBatchQty, cleanupJournalEntries, closePool, ensureOpenShift, closeShiftIfCreated,
 } from './helpers/test-client'
 
 jest.setTimeout(60000)
 
 let userIds: { superadmin: string; admin: string; pharmacist: string }
+let testShift: { shiftId: string; created: boolean }
 
 // Tracked IDs for final cleanup (afterAll, bottom of file)
 const journalEntryIds = new Set<string>()
@@ -108,6 +109,7 @@ async function getSaleItems(saleId: string) {
 
 beforeAll(async () => {
   userIds = await getTestUserIds()
+  testShift = await ensureOpenShift(userIds.pharmacist)
 })
 
 afterAll(async () => {
@@ -163,6 +165,7 @@ afterAll(async () => {
     if (medicineIds.size) await step('medicines', () => serviceClient.from('medicines').delete().in('id', [...medicineIds]))
     if (supplierIds.size) await step('suppliers', () => serviceClient.from('suppliers').delete().in('id', [...supplierIds]))
     if (customerIds.size) await step('customers', () => serviceClient.from('customers').delete().in('id', [...customerIds]))
+    await step('shift', () => closeShiftIfCreated(testShift.shiftId, testShift.created))
   } finally {
     await closePool()
   }
