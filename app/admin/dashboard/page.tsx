@@ -8,7 +8,10 @@ import { createClient }    from '@/lib/supabase/server'
 export default async function AdminDashboardPage() {
   const supabase = await createClient()
 
-  const [alertResult, { count: openPOCount }, { count: activeSupplierCount }] = await Promise.all([
+  const last90 = new Date()
+  last90.setDate(last90.getDate() - 90)
+
+  const [alertResult, { count: openPOCount }, { count: activeSupplierCount }, { count: recentShiftCount }] = await Promise.all([
     getAlertSummary(),
     supabase
       .from('purchase_orders')
@@ -20,6 +23,10 @@ export default async function AdminDashboardPage() {
       .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
       .eq('is_deleted', false),
+    supabase
+      .from('shifts')
+      .select('id', { count: 'exact', head: true })
+      .gte('opened_at', last90.toISOString()),
   ])
 
   const alerts = alertResult.data
@@ -49,7 +56,12 @@ export default async function AdminDashboardPage() {
           icon={Truck}
           loading={activeSupplierCount == null}
         />
-        <StatCard label="Shifts Today" value="—" icon={Clock} loading={true} />
+        <StatCard
+          label="Shifts (Last 90 Days)"
+          value={recentShiftCount != null ? String(recentShiftCount) : '—'}
+          icon={Clock}
+          loading={recentShiftCount == null}
+        />
       </div>
       {alerts && (
         <AlertsPanel

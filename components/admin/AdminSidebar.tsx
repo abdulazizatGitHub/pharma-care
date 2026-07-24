@@ -24,11 +24,9 @@ import { ICON_SIZE, SIDEBAR, BRAND } from '@/lib/design-tokens'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface GroupChild {
-  href: string
-  label: string
-  permission: Permission | null
-}
+type GroupChild =
+  | { href: string; label: string; permission: Permission | null; disabled?: never }
+  | { href?: string; label: string; permission: Permission | null; disabled: true }
 
 interface NavItem {
   type?: 'item'
@@ -68,7 +66,7 @@ const NAV_ENTRIES: NavEntry[] = [
   {
     type: 'group', label: 'Customers', icon: Users,
     children: [
-      { href: '/admin/customers',        label: 'Customers',          permission: 'customers' },
+      { label: 'Customers', permission: 'customers', disabled: true },
       { href: '/admin/ledger/customers', label: 'Customers (Udhaar)', permission: 'customers' },
     ],
   },
@@ -193,7 +191,7 @@ export function AdminSidebar({ pharmacyName }: Props) {
             // ── Collapsible group ────────────────────────────────────────────
             if (entry.type === 'group') {
               const visChildren = entry.children.filter(
-                c => c.permission === null || hasPermission(permissions, c.permission),
+                c => c.disabled || c.permission === null || hasPermission(permissions, c.permission),
               )
               if (visChildren.length === 0) return null
 
@@ -246,7 +244,36 @@ export function AdminSidebar({ pharmacyName }: Props) {
                     }}
                   >
                     <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                      {visChildren.map(child => {
+                      {visChildren.map((child, ci) => {
+                        if (child.disabled) {
+                          return (
+                            <li key={`disabled-${entry.label}-${ci}`}>
+                              <div
+                                style={{
+                                  display: 'flex', alignItems: 'center',
+                                  padding: '6px 10px 6px 37px', borderRadius: 6, marginBottom: 1,
+                                  opacity: 0.45, cursor: 'not-allowed',
+                                }}
+                              >
+                                <span style={{ display: 'flex', alignItems: 'center', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', color: SIDEBAR.textInactive }}>
+                                  {child.label}
+                                  <span style={{
+                                    fontSize: 9,
+                                    fontWeight: 600,
+                                    letterSpacing: '0.05em',
+                                    background: '#E5E7EB',
+                                    color: '#6B7280',
+                                    borderRadius: 4,
+                                    padding: '1px 5px',
+                                    marginLeft: 6,
+                                    textTransform: 'uppercase',
+                                    flexShrink: 0,
+                                  }}>Soon</span>
+                                </span>
+                              </div>
+                            </li>
+                          )
+                        }
                         const childActive = pathname === child.href
                         return (
                           <li key={child.href}>

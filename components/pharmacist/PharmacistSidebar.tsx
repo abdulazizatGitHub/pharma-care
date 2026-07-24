@@ -30,6 +30,7 @@ interface NavItem {
   label: string
   icon: React.ComponentType<{ size?: number; className?: string }>
   permission: Permission | null
+  disabled?: boolean
 }
 
 interface NavGroup {
@@ -46,7 +47,7 @@ type NavEntry = NavItem | NavGroup
 const NAV_ENTRIES: NavEntry[] = [
   { href: '/pharmacist/dashboard',           label: 'Dashboard',       icon: LayoutDashboard, permission: null },
   { href: '/pharmacist/pos',                 label: 'POS',             icon: ShoppingCart,    permission: 'pos' },
-  { href: '/pharmacist/customers',           label: 'Customers',       icon: Users,           permission: 'customers' },
+  { href: '/pharmacist/customers',           label: 'Customers',       icon: Users,           permission: 'customers', disabled: true },
   { href: '/pharmacist/shifts',              label: 'Shifts',          icon: Clock,           permission: 'shifts' },
   { href: '/pharmacist/inventory',           label: 'Inventory',       icon: Package,         permission: 'inventory_view' },
   {
@@ -55,8 +56,8 @@ const NAV_ENTRIES: NavEntry[] = [
       { href: '/pharmacist/reports', label: 'Overview', permission: 'reports_basic' },
     ],
   },
-  { href: '/pharmacist/prescriptions',       label: 'Prescriptions',   icon: FileText,        permission: 'prescriptions' },
-  { href: '/pharmacist/controlled-register', label: 'Controlled Drugs', icon: Shield,         permission: 'controlled_drugs' },
+  { href: '/pharmacist/prescriptions',       label: 'Prescriptions',   icon: FileText,        permission: 'prescriptions', disabled: true },
+  { href: '/pharmacist/controlled-register', label: 'Controlled Drugs', icon: Shield,         permission: 'controlled_drugs', disabled: true },
 ]
 
 const PH_STORAGE_KEY = 'sidebar_pharmacist_reports_expanded'
@@ -231,8 +232,50 @@ export function PharmacistSidebar({ pharmacyName }: Props) {
             }
 
             // ── Regular nav item ─────────────────────────────────────────────
-            const { href, label, icon: Icon, permission } = entry as NavItem
-            if (permission !== null && !hasPermission(permissions, permission)) return null
+            const { href, label, icon: Icon, permission, disabled } = entry as NavItem
+            if (!disabled && permission !== null && !hasPermission(permissions, permission)) return null
+
+            if (disabled) {
+              return (
+                <li key={href}>
+                  <div
+                    title={!expanded ? label : undefined}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '7px 10px', borderRadius: 6,
+                      opacity: 0.45, cursor: 'not-allowed', marginBottom: 1,
+                    }}
+                  >
+                    <span style={{ flexShrink: 0, display: 'inline-flex', color: SIDEBAR.iconInactive }}>
+                      <Icon size={ICON_SIZE.nav} />
+                    </span>
+                    <span
+                      style={{
+                        display: 'flex', alignItems: 'center',
+                        fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
+                        color: SIDEBAR.textInactive,
+                        opacity: expanded ? 1 : 0, transition: 'opacity 0.15s ease',
+                      }}
+                    >
+                      {label}
+                      <span style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        letterSpacing: '0.05em',
+                        background: '#E5E7EB',
+                        color: '#6B7280',
+                        borderRadius: 4,
+                        padding: '1px 5px',
+                        marginLeft: 6,
+                        textTransform: 'uppercase',
+                        flexShrink: 0,
+                      }}>Soon</span>
+                    </span>
+                  </div>
+                </li>
+              )
+            }
+
             const active = pathname === href || pathname.startsWith(href + '/')
             return (
               <li key={href}>

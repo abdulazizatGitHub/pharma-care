@@ -14,12 +14,20 @@ export default async function SuperadminDashboardPage() {
   const supabase = await createClient()
 
   const now      = new Date()
-  const year     = now.getFullYear()
-  const month    = now.getMonth()
-  const dateFrom = new Date(year, month, 1).toISOString().split('T')[0]
-  const dateTo   = new Date(year, month + 1, 0).toISOString().split('T')[0]
+  const dateTo   = now.toISOString().split('T')[0]
+  const last90   = new Date(now)
+  last90.setDate(last90.getDate() - 90)
+  const dateFrom = last90.toISOString().split('T')[0]
 
-  const [alertResult, { count: pendingPOCount }, expenseSummaryResult, { count: pendingReturnCount }, settlementResult] = await Promise.all([
+  const [
+    alertResult,
+    { count: pendingPOCount },
+    expenseSummaryResult,
+    { count: pendingReturnCount },
+    settlementResult,
+    { count: totalUserCount },
+    { count: activePharmacistCount },
+  ] = await Promise.all([
     getAlertSummary(),
     supabase
       .from('purchase_orders')
@@ -33,6 +41,16 @@ export default async function SuperadminDashboardPage() {
       .eq('status', 'pending_approval')
       .eq('is_deleted', false),
     getSettlementDuePharmacies(),
+    supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_deleted', false),
+    supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'pharmacist')
+      .eq('is_active', true)
+      .eq('is_deleted', false),
   ])
 
   const alerts              = alertResult.data
@@ -46,11 +64,11 @@ export default async function SuperadminDashboardPage() {
         description="System overview across all roles and locations."
       />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-        <StatCard label="Total Users"        value="—" icon={Users}   loading={true} />
-        <StatCard label="Active Pharmacists" value="—" icon={Pill}    loading={true} />
+        <StatCard label="Total Users"        value={String(totalUserCount ?? 0)}        icon={Users} />
+        <StatCard label="Active Pharmacists" value={String(activePharmacistCount ?? 0)} icon={Pill}  />
         <StatCard label="Pending Approvals"  value={String(pendingPOCount ?? 0)} icon={Clock} />
         <StatCard
-          label="Expenses This Month"
+          label="Expenses (Last 90 Days)"
           value={fmtPKR(monthlyExpenses)}
           icon={Receipt}
         />
