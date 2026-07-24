@@ -11,15 +11,31 @@ export default async function PharmacistDashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const [alertResult, shiftResult] = await Promise.all([
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const todayISO = today.toISOString()
+
+  const [alertResult, shiftResult, salesTodayResult] = await Promise.all([
     getAlertSummary(),
     user ? getCurrentShift(user.id) : Promise.resolve({ data: null, error: null }),
+    user
+      ? supabase
+          .from('sales')
+          .select('id, total_amount')
+          .eq('cashier_id', user.id)
+          .eq('is_deleted', false)
+          .gte('created_at', todayISO)
+      : Promise.resolve({ data: null, error: null }),
   ])
 
   const alerts        = alertResult.data
   const shift         = shiftResult.data
   const wasAutoClosed = (shiftResult as { wasAutoClosed?: boolean }).wasAutoClosed === true
   const shiftLabel    = shift ? 'Open' : 'No shift'
+
+  const salesToday      = salesTodayResult.data ?? []
+  const salesTodayCount = salesToday.length
+  const salesTodayLabel = `${salesTodayCount} sale${salesTodayCount === 1 ? '' : 's'}`
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -46,10 +62,14 @@ export default async function PharmacistDashboardPage() {
       <ShiftStatusBanner initialShift={shift} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-        <StatCard label="My Sales Today"          value="—" icon={ShoppingCart} loading={true} />
-        <StatCard label="Shift Status"             value={shiftLabel} icon={Clock} />
-        <StatCard label="Open Prescriptions"       value="—" icon={FileText}     loading={true} />
-        <StatCard label="Controlled Drug Entries"  value="—" icon={Shield}       loading={true} />
+        <StatCard label="My Sales Today" value={salesTodayLabel} icon={ShoppingCart} />
+        <StatCard label="Shift Status"   value={shiftLabel}      icon={Clock} />
+        <div style={{ opacity: 0.5 }}>
+          <StatCard label="Prescriptions" value="Soon" icon={FileText} />
+        </div>
+        <div style={{ opacity: 0.5 }}>
+          <StatCard label="Controlled Drugs" value="Soon" icon={Shield} />
+        </div>
       </div>
       {alerts && (
         <AlertsPanel
